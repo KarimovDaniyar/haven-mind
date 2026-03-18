@@ -1,13 +1,20 @@
 import React, { useState, useMemo } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
-import { Search, Plus, FileText, LayoutGrid } from 'lucide-react';
+import { Search, Plus, FileText, LayoutGrid, Trash2, Edit2 } from 'lucide-react';
 import { useAppStore, Note } from '../store/appStore';
+import {
+  ContextMenu,
+  ContextMenuContent,
+  ContextMenuItem,
+  ContextMenuTrigger,
+} from './ui/context-menu';
 
 export default function NoteList() {
-  const { notes, activeNoteId, setActiveNoteId, addNote } = useAppStore();
+  const { notes, activeNoteId, setActiveNoteId, addNote, updateNote, deleteNote } = useAppStore();
   const [searchOpen, setSearchOpen] = useState(false);
   const [searchQuery, setSearchQuery] = useState('');
-  const [showNewMenu, setShowNewMenu] = useState(false);
+  const [renamingId, setRenamingId] = useState<string | null>(null);
+  const [tempTitle, setTempTitle] = useState('');
 
   const filteredNotes = useMemo(() => {
     if (!searchQuery.trim()) return notes;
@@ -29,7 +36,14 @@ export default function NoteList() {
     };
     addNote(note);
     setActiveNoteId(note.id);
-    setShowNewMenu(false);
+    // Start renaming immediately for new notes
+    setRenamingId(note.id);
+    setTempTitle('');
+  };
+
+  const handleRename = (id: string, title: string) => {
+    updateNote(id, { title: title.trim() || 'Untitled' });
+    setRenamingId(null);
   };
 
   const getPreview = (note: Note) => {
@@ -70,42 +84,26 @@ export default function NoteList() {
         <div className="flex items-center gap-0.5 ml-2 flex-shrink-0">
           <button
             onClick={() => setSearchOpen(!searchOpen)}
-            className="w-7 h-7 flex items-center justify-center rounded-md text-muted-foreground hover:text-foreground hover:bg-surface-hover transition-spring-micro"
+            className="w-7 h-7 flex items-center justify-center rounded-md text-muted-foreground hover:text-foreground hover:bg-surface-hover transition-colors duration-200"
           >
             <Search size={14} />
           </button>
-          <div className="relative">
-            <button
-              onClick={() => setShowNewMenu(!showNewMenu)}
-              className="w-7 h-7 flex items-center justify-center rounded-md text-muted-foreground hover:text-foreground hover:bg-surface-hover transition-spring-micro"
-            >
-              <Plus size={14} />
-            </button>
-            <AnimatePresence>
-              {showNewMenu && (
-                <motion.div
-                  initial={{ opacity: 0, y: -4, scale: 0.95 }}
-                  animate={{ opacity: 1, y: 0, scale: 1 }}
-                  exit={{ opacity: 0, y: -4, scale: 0.95 }}
-                  transition={{ type: 'spring', stiffness: 500, damping: 30 }}
-                  className="absolute right-0 top-8 bg-popover text-popover-foreground rounded-lg shadow-lg border border-border/50 py-1 z-50 min-w-[140px]"
-                >
-                  <button
-                    onClick={() => createNote('text')}
-                    className="w-full px-3 py-1.5 text-left text-xs flex items-center gap-2 hover:bg-accent/20 transition-spring-micro"
-                  >
-                    <FileText size={13} /> Text note
-                  </button>
-                  <button
-                    onClick={() => createNote('canvas')}
-                    className="w-full px-3 py-1.5 text-left text-xs flex items-center gap-2 hover:bg-accent/20 transition-spring-micro"
-                  >
-                    <LayoutGrid size={13} /> Canvas
-                  </button>
-                </motion.div>
-              )}
-            </AnimatePresence>
-          </div>
+          
+          <button
+            onClick={() => createNote('text')}
+            className="w-7 h-7 flex items-center justify-center rounded-md text-muted-foreground hover:text-foreground hover:bg-surface-hover transition-colors duration-200"
+            title="New text note"
+          >
+            <FileText size={14} />
+          </button>
+          
+          <button
+            onClick={() => createNote('canvas')}
+            className="w-7 h-7 flex items-center justify-center rounded-md text-muted-foreground hover:text-foreground hover:bg-surface-hover transition-colors duration-200"
+            title="New canvas"
+          >
+            <LayoutGrid size={14} />
+          </button>
         </div>
       </div>
 
@@ -113,27 +111,76 @@ export default function NoteList() {
       <div className="flex-1 overflow-y-auto px-2 pb-2">
         {filteredNotes.map((note) => {
           const isActive = activeNoteId === note.id;
+          const isRenaming = renamingId === note.id;
+          
           return (
-            <button
-              key={note.id}
-              onClick={() => setActiveNoteId(note.id)}
-              className={`w-full text-left px-3 py-2.5 rounded-md mb-0.5 transition-spring-micro ${
-                isActive
-                  ? 'bg-surface-active border-l-2 border-l-accent'
-                  : 'hover:bg-surface-active border-l-2 border-l-transparent'
-              }`}
-            >
-              <div className="flex items-center gap-1.5">
-                {note.type === 'canvas' && (
-                  <LayoutGrid size={11} className="text-muted-foreground flex-shrink-0" />
-                )}
-                <span className="text-[13px] font-medium text-foreground truncate">
-                  {note.title || 'Untitled'}
-                </span>
-              </div>
-              <p className="text-xs text-muted-foreground truncate mt-0.5">{getPreview(note)}</p>
-              <p className="text-[11px] text-muted-foreground mt-0.5">{formatDate(note.updatedAt)}</p>
-            </button>
+            <ContextMenu key={note.id}>
+              <ContextMenuTrigger>
+                <div
+                  draggable
+                  onDragStart={(e) => {
+                    e.dataTransfer.setData('text/plain', note.id);
+                    e.dataTransfer.setData('noteId', note.id);
+                    e.dataTransfer.effectAllowed = 'copy';
+                  }}
+                  className="group relative"
+                >
+                  <button
+                    onClick={() => { if (!isRenaming) setActiveNoteId(note.id); }}
+                    className={`w-full text-left px-3 py-2.5 rounded-md mb-0.5 transition-colors duration-200 ${
+                      isActive
+                        ? 'bg-surface-active border-l-2 border-l-accent'
+                        : 'hover:bg-surface-hover border-l-2 border-l-transparent'
+                    }`}
+                  >
+                    <div className="flex items-center gap-1.5 pr-6">
+                      {note.type === 'canvas' && (
+                        <LayoutGrid size={11} className="text-muted-foreground flex-shrink-0" />
+                      )}
+                      
+                      {isRenaming ? (
+                        <input
+                          autoFocus
+                          value={tempTitle}
+                          onChange={(e) => setTempTitle(e.target.value)}
+                          onBlur={() => handleRename(note.id, tempTitle)}
+                          onKeyDown={(e) => {
+                            if (e.key === 'Enter') handleRename(note.id, tempTitle);
+                            if (e.key === 'Escape') setRenamingId(null);
+                          }}
+                          className="bg-transparent text-[13px] font-medium text-foreground outline-none w-full"
+                          onClick={(e) => e.stopPropagation()}
+                        />
+                      ) : (
+                        <span className="text-[13px] font-medium text-foreground truncate">
+                          {note.title || 'Untitled'}
+                        </span>
+                      )}
+                    </div>
+                    <p className="text-xs text-muted-foreground truncate mt-0.5">{getPreview(note)}</p>
+                    <p className="text-[11px] text-muted-foreground mt-0.5">{formatDate(note.updatedAt)}</p>
+                  </button>
+                </div>
+              </ContextMenuTrigger>
+              <ContextMenuContent className="bg-surface border-border shadow-md rounded-lg min-w-[160px] p-1 animate-in fade-in-0 zoom-in-95">
+                <ContextMenuItem 
+                  onClick={() => {
+                    setRenamingId(note.id);
+                    setTempTitle(note.title);
+                  }}
+                  className="flex items-center gap-2 px-3 py-2 text-xs text-muted-foreground hover:text-foreground hover:bg-surface-hover rounded-md cursor-pointer transition-colors duration-200 outline-none font-medium"
+                >
+                  <Edit2 className="w-3.5 h-3.5" /> Rename
+                </ContextMenuItem>
+                <div className="h-[1px] bg-border my-1 mx-1" />
+                <ContextMenuItem 
+                  className="flex items-center gap-2 px-3 py-2 text-xs text-destructive hover:bg-destructive/10 rounded-md cursor-pointer transition-colors duration-200 outline-none font-medium"
+                  onClick={() => { if (confirm('Delete this note?')) deleteNote(note.id); }}
+                >
+                  <Trash2 className="w-3.5 h-3.5" /> Delete
+                </ContextMenuItem>
+              </ContextMenuContent>
+            </ContextMenu>
           );
         })}
       </div>

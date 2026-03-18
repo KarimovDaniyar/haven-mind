@@ -1,9 +1,10 @@
 import React, { useState, useRef, useCallback, useEffect } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
-import { Hand, MousePointer2, Plus, Square, Circle, Pencil, Maximize2 } from 'lucide-react';
+import { Hand, MousePointer2, Plus, Square, Pencil, Maximize2 } from 'lucide-react';
 import { useAppStore, CanvasCard, CanvasArrow, CanvasGroup, InkStroke } from '../store/appStore';
+import { renderMarkdown } from '../utils/markdown';
 
-type CanvasTool = 'select' | 'pan' | 'card' | 'frame' | 'circle' | 'ink';
+type CanvasTool = 'select' | 'pan' | 'card' | 'frame' | 'ink';
 
 // Point-in-polygon (ray casting)
 function pointInPolygon(point: { x: number; y: number }, polygon: { x: number; y: number }[]): boolean {
@@ -27,13 +28,14 @@ function pointsToSvgPath(points: { x: number; y: number }[]): string {
 }
 
 export default function CanvasView() {
-  const { notes, activeNoteId, updateNote } = useAppStore();
+  const { notes, activeNoteId, updateNote, setActiveNoteId, setActiveView } = useAppStore();
   const note = notes.find((n) => n.id === activeNoteId);
 
   const [tool, setTool] = useState<CanvasTool>('select');
   const [offset, setOffset] = useState({ x: 0, y: 0 });
   const [zoom, setZoom] = useState(1);
   const canvasRef = useRef<HTMLDivElement>(null);
+  const containerRef = useRef<HTMLDivElement>(null);
 
   // Selection
   const [selectedCards, setSelectedCards] = useState<Set<string>>(new Set());
@@ -61,23 +63,43 @@ export default function CanvasView() {
   // Frame dragging
   const [draggingFrame, setDraggingFrame] = useState<{ frameId: string; startX: number; startY: number; origX: number; origY: number } | null>(null);
 
+  // Frame resizing
+  const [resizingFrame, setResizingFrame] = useState<{ id: string; startX: number; startY: number; startW: number; startH: number } | null>(null);
+
   // Lasso select
   const [lassoRect, setLassoRect] = useState<{ startX: number; startY: number; currentX: number; currentY: number } | null>(null);
 
-  // Circle select (freehand lasso)
-  const [circlePoints, setCirclePoints] = useState<{ x: number; y: number }[]>([]);
-  const [fadingCircle, setFadingCircle] = useState<{ x: number; y: number }[] | null>(null);
-
   // Ink
   const [currentInkPoints, setCurrentInkPoints] = useState<{ x: number; y: number }[] | null>(null);
-  const [inkColor, setInkColor] = useState('#1C1917');
+  const [inkColor, setInkColor] = useState('hsl(var(--foreground))');
   const [isErasing, setIsErasing] = useState(false);
   const [inkUndoStack, setInkUndoStack] = useState<InkStroke[]>([]);
+
+  const inkColors = ['hsl(var(--foreground))', '#EF4444', '#F59E0B', '#10B981', '#3B82F6', '#8B5CF6'];
 
   const cards = note?.canvasCards || [];
   const arrows = note?.canvasArrows || [];
   const groups = note?.canvasGroups || [];
   const inkStrokes = note?.inkStrokes || [];
+
+  const cardEditorRef = useRef<HTMLTextAreaElement>(null);
+
+  // Auto-resize card editor
+  useEffect(() => {
+    if (editingCard && cardEditorRef.current) {
+      const textarea = cardEditorRef.current;
+      textarea.style.height = 'auto';
+      textarea.style.height = `${textarea.scrollHeight}px`;
+    }
+  }, [editingCard, cards]); // Watch cards state to catch updates
+
+  const handleLinkClick = useCallback((title: string) => {
+    const target = notes.find((n) => n.title.toLowerCase() === title.toLowerCase());
+    if (target) {
+      setActiveNoteId(target.id);
+      setActiveView('notes');
+    }
+  }, [notes, setActiveNoteId, setActiveView]);
 
   const updateCards = useCallback((newCards: CanvasCard[]) => {
     if (note) updateNote(note.id, { canvasCards: newCards });
@@ -105,7 +127,9 @@ export default function CanvasView() {
   }, [offset, zoom]);
 
   const getCardCenter = (card: CanvasCard, side: string) => {
-    const w = card.width || 240, h = 100;
+    const w = card.width || 240;
+    // Heuristic: estimate height based on content length + padding
+    const h = Math.max(100, (card.content.split('\n').length * 18) + 40);
     switch (side) {
       case 'top': return { x: card.x + w / 2, y: card.y };
       case 'bottom': return { x: card.x + w / 2, y: card.y + h };
@@ -116,7 +140,8 @@ export default function CanvasView() {
   };
 
   const getCardRect = (card: CanvasCard) => {
-    const w = card.width || 240, h = 100;
+    const w = card.width || 240;
+    const h = 200; // Increased default height for better hit detection
     return { x: card.x, y: card.y, w, h, cx: card.x + w / 2, cy: card.y + h / 2 };
   };
 
@@ -134,11 +159,13 @@ export default function CanvasView() {
   // Keyboard shortcuts
   useEffect(() => {
     const handler = (e: KeyboardEvent) => {
-      if (editingCard || editingArrowLabel) return;
+      const isInputActive = document.activeElement?.tagName === 'INPUT' || 
+                           document.activeElement?.tagName === 'TEXTAREA' || 
+                           (document.activeElement as HTMLElement)?.isContentEditable;
+      if (editingCard || editingArrowLabel || isInputActive) return;
 
       if (e.key === 'v' || e.key === 'V') setTool('select');
       if (e.key === 'h' || e.key === 'H') setTool('pan');
-      if (e.key === 'c' || e.key === 'C') setTool('circle');
       if (e.key === 'i' || e.key === 'I') setTool('ink');
       if (e.key === 'r' || e.key === 'R') setTool('frame');
       if (e.key === 'f' || e.key === 'F') handleFitView();
@@ -150,6 +177,10 @@ export default function CanvasView() {
       if ((e.key === 'Delete' || e.key === 'Backspace') && selectedFrame) {
         updateGroups(groups.filter((g) => g.id !== selectedFrame));
         setSelectedFrame(null);
+      }
+      if ((e.key === 'Delete' || e.key === 'Backspace') && selectedCards.size > 0) {
+        updateCards(cards.filter((c) => !selectedCards.has(c.id)));
+        setSelectedCards(new Set());
       }
       if (e.key === 'Escape') {
         setSelectedCards(new Set());
@@ -210,6 +241,15 @@ export default function CanvasView() {
     }
   };
 
+  const startArrowDraw = (cardId: string, side: string, e: React.MouseEvent) => {
+    e.stopPropagation();
+    e.preventDefault();
+    const card = cards.find((c) => c.id === cardId);
+    if (!card) return;
+    const pos = getCardCenter(card, side);
+    setDrawingArrow({ fromCardId: cardId, fromSide: side, currentX: pos.x, currentY: pos.y });
+  };
+
   // ---- MOUSE HANDLERS ----
   const handleMouseDown = (e: React.MouseEvent) => {
     const target = e.target as HTMLElement;
@@ -238,20 +278,16 @@ export default function CanvasView() {
       return;
     }
 
-    if (tool === 'circle') {
-      setCirclePoints([{ x, y }]);
-      return;
-    }
-
     if (tool === 'ink') {
       if (isErasing) {
         // Erase strokes near cursor
-        const eraseRadius = 20 / zoom;
+        const eraseRadius = 24 / zoom;
         const remaining = inkStrokes.filter((stroke) => {
           return !stroke.points.some((p) => Math.sqrt((p.x - x) ** 2 + (p.y - y) ** 2) < eraseRadius);
         });
         if (remaining.length !== inkStrokes.length) updateInkStrokes(remaining);
       } else {
+        // Start ink
         setCurrentInkPoints([{ x, y }]);
       }
       return;
@@ -326,13 +362,17 @@ export default function CanvasView() {
       return;
     }
 
-    if (lassoRect) {
-      setLassoRect({ ...lassoRect, currentX: x, currentY: y });
+    if (resizingFrame) {
+      const dx = x - resizingFrame.startX;
+      const dy = y - resizingFrame.startY;
+      updateGroups(groups.map((g) => g.id === resizingFrame.id 
+        ? { ...g, width: Math.max(100, resizingFrame.startW + dx), height: Math.max(100, resizingFrame.startH + dy) } 
+        : g));
       return;
     }
 
-    if (circlePoints.length > 0) {
-      setCirclePoints((pts) => [...pts, { x, y }]);
+    if (lassoRect) {
+      setLassoRect({ ...lassoRect, currentX: x, currentY: y });
       return;
     }
 
@@ -404,6 +444,7 @@ export default function CanvasView() {
     }
 
     if (draggingFrame) { setDraggingFrame(null); return; }
+    if (resizingFrame) { setResizingFrame(null); return; }
 
     if (lassoRect) {
       const lx = Math.min(lassoRect.startX, lassoRect.currentX);
@@ -420,22 +461,6 @@ export default function CanvasView() {
       setLassoRect(null);
       return;
     }
-
-    if (circlePoints.length > 2) {
-      // Close the path and select contained cards
-      const polygon = [...circlePoints, circlePoints[0]];
-      const selected = cards.filter((c) => {
-        const r = getCardRect(c);
-        return pointInPolygon({ x: r.cx, y: r.cy }, polygon);
-      });
-      setSelectedCards(new Set(selected.map((c) => c.id)));
-      setFadingCircle(circlePoints);
-      setCirclePoints([]);
-      setTimeout(() => setFadingCircle(null), 400);
-      setTool('select');
-      return;
-    }
-    setCirclePoints([]);
 
     if (currentInkPoints && currentInkPoints.length > 1 && !isErasing) {
       const newStroke: InkStroke = { id: `ink-${Date.now()}`, points: currentInkPoints, color: inkColor };
@@ -458,14 +483,6 @@ export default function CanvasView() {
     setDragState({ startX: cx, startY: cy, offsets });
   };
 
-  // Arrow handle mouse down
-  const startArrowDraw = (cardId: string, side: string, e: React.MouseEvent) => {
-    e.stopPropagation();
-    const card = cards.find((c) => c.id === cardId);
-    if (!card) return;
-    const pos = getCardCenter(card, side);
-    setDrawingArrow({ fromCardId: cardId, fromSide: side, currentX: pos.x, currentY: pos.y });
-  };
 
   const handleFitView = () => {
     if (cards.length === 0) { setOffset({ x: 0, y: 0 }); setZoom(1); return; }
@@ -499,13 +516,10 @@ export default function CanvasView() {
     return `M ${from.x} ${from.y} Q ${mx + nx * 0.3} ${my + ny * 0.3} ${to.x} ${to.y}`;
   };
 
-  const inkColors = ['#1C1917', '#8B6F47', '#C4B09A', '#6B8F71', '#8B7BA8'];
-
   const getCursor = () => {
     if (tool === 'pan' || isPanning) return 'grab';
     if (tool === 'ink' && isErasing) return 'cell';
     if (tool === 'ink') return 'crosshair';
-    if (tool === 'circle') return 'crosshair';
     if (tool === 'frame') return 'crosshair';
     if (tool === 'card') return 'copy';
     return 'default';
@@ -516,24 +530,65 @@ export default function CanvasView() {
   const handles: ('top' | 'right' | 'bottom' | 'left')[] = ['top', 'right', 'bottom', 'left'];
 
   return (
-    <div className="flex-1 h-full relative overflow-hidden bg-background">
+    <div
+      ref={containerRef}
+      className="flex-1 h-full overflow-hidden relative bg-background/50 cursor-crosshair touch-none z-[1]"
+    >
       <div
         ref={canvasRef}
         data-canvas="true"
-        className="w-full h-full relative"
+        className="w-full h-full relative select-none"
+        onDragStart={(e) => e.preventDefault()}
+        onMouseDown={(e) => {
+          // If clicking background, SVG strokes, or handles, prevent default to stop browser native drag
+          const target = e.target as Element;
+          if (
+            (target as HTMLElement).dataset?.canvas ||
+            target.closest?.('[data-handle]') ||
+            target.tagName?.toLowerCase() === 'svg' ||
+            target.tagName?.toLowerCase() === 'path'
+          ) {
+            e.preventDefault();
+          }
+          handleMouseDown(e);
+        }}
+        onMouseMove={handleMouseMove}
+        onMouseUp={handleMouseUp}
+        onWheel={handleWheel}
+        onDragOver={(e) => {
+          e.preventDefault();
+          e.dataTransfer.dropEffect = 'copy';
+        }}
+        onDrop={(e) => {
+          e.preventDefault();
+          const noteId = e.dataTransfer.getData('noteId') || e.dataTransfer.getData('text/plain');
+          if (!noteId) return;
+
+          const sidebarNote = notes.find((n) => n.id === noteId);
+          if (!sidebarNote) return;
+
+          const { x, y } = screenToCanvas(e.clientX, e.clientY);
+          
+          const newCard: CanvasCard = {
+            id: `card-${Date.now()}`,
+            linkedNoteId: sidebarNote.id,
+            content: sidebarNote.content,
+            x,
+            y,
+            width: 240,
+          };
+
+          updateCards([...cards, newCard]);
+        }}
+        onMouseLeave={() => { setIsPanning(false); setDragState(null); setDrawingArrow(null); setCurrentInkPoints(null); }}
         style={{
           cursor: getCursor(),
           backgroundImage: `radial-gradient(circle, hsl(var(--dot-grid)) 1px, transparent 1px)`,
           backgroundSize: `${20 * zoom}px ${20 * zoom}px`,
           backgroundPosition: `${offset.x}px ${offset.y}px`,
         }}
-        onWheel={handleWheel}
-        onMouseDown={handleMouseDown}
-        onMouseMove={handleMouseMove}
-        onMouseUp={handleMouseUp}
-        onMouseLeave={() => { setIsPanning(false); setDragState(null); setDrawingArrow(null); setCirclePoints([]); setCurrentInkPoints(null); }}
       >
-        <div style={{ transform: `translate(${offset.x}px, ${offset.y}px) scale(${zoom})`, transformOrigin: '0 0' }}>
+        <div className="absolute inset-0" style={{ transform: `translate(${offset.x}px, ${offset.y}px) scale(${zoom})`, transformOrigin: '0 0' }}>
           {/* Groups/Frames */}
           {groups.map((group) => (
             <div
@@ -562,6 +617,22 @@ export default function CanvasView() {
               >
                 {group.label}
               </span>
+
+              {/* Resize handle */}
+              {selectedFrame === group.id && (
+                <div
+                  className="absolute bottom-1 right-1 w-3 h-3 cursor-nwse-resize flex items-center justify-center opacity-40 hover:opacity-100"
+                  onMouseDown={(e) => {
+                    e.stopPropagation();
+                    const { x, y } = screenToCanvas(e.clientX, e.clientY);
+                    setResizingFrame({ id: group.id, startX: x, startY: y, startW: group.width, startH: group.height });
+                  }}
+                >
+                  <svg width="8" height="8" viewBox="0 0 8 8" fill="none">
+                    <path d="M7 1L1 7M7 4L4 7M7 7H7.01" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round"/>
+                  </svg>
+                </div>
+              )}
             </div>
           ))}
 
@@ -658,44 +729,18 @@ export default function CanvasView() {
                 strokeDasharray="4 4"
               />
             )}
-
-            {/* Circle select path */}
-            {circlePoints.length > 1 && (
-              <path
-                d={pointsToSvgPath(circlePoints) + ' Z'}
-                fill="none"
-                stroke="hsl(var(--accent))"
-                strokeWidth={2}
-                opacity={0.5}
-                strokeLinecap="round"
-                strokeLinejoin="round"
-              />
-            )}
-
-            {/* Fading circle */}
-            {fadingCircle && (
-              <path
-                d={pointsToSvgPath(fadingCircle) + ' Z'}
-                fill="none"
-                stroke="hsl(var(--accent))"
-                strokeWidth={2}
-                strokeLinecap="round"
-                strokeLinejoin="round"
-                style={{ opacity: 0, transition: 'opacity 400ms ease-out' }}
-              />
-            )}
           </svg>
 
           {/* Ink layer */}
-          <svg className="absolute inset-0" style={{ overflow: 'visible', width: '100%', height: '100%', pointerEvents: tool === 'ink' ? 'auto' : 'none' }}>
+          <svg className="absolute inset-0 pointer-events-none" style={{ overflow: 'visible', width: '100%', height: '100%' }}>
             {inkStrokes.map((stroke) => (
               <path
                 key={stroke.id}
                 d={pointsToSvgPath(stroke.points)}
                 fill="none"
                 stroke={stroke.color}
-                strokeWidth={2}
-                opacity={0.7}
+                strokeWidth={3}
+                opacity={0.8}
                 strokeLinecap="round"
                 strokeLinejoin="round"
               />
@@ -705,8 +750,8 @@ export default function CanvasView() {
                 d={pointsToSvgPath(currentInkPoints)}
                 fill="none"
                 stroke={inkColor}
-                strokeWidth={2}
-                opacity={0.7}
+                strokeWidth={3}
+                opacity={0.8}
                 strokeLinecap="round"
                 strokeLinejoin="round"
               />
@@ -726,7 +771,8 @@ export default function CanvasView() {
               <motion.div
                 key={card.id}
                 data-card
-                className="absolute"
+                dragTransition={{ power: 0, timeConstant: 200 }}
+                className="absolute z-20"
                 style={{ left: card.x, top: card.y }}
                 initial={{ scale: 0.9, opacity: 0 }}
                 animate={{ scale: 1, opacity: 1 }}
@@ -749,17 +795,23 @@ export default function CanvasView() {
                 >
                   {isEditMode ? (
                     <textarea
+                      ref={cardEditorRef}
                       autoFocus
                       value={card.content}
                       onChange={(e) => updateCards(cards.map((c) => c.id === card.id ? { ...c, content: e.target.value } : c))}
-                      onKeyDown={(e) => { if (e.key === 'Escape') setEditingCard(null); }}
                       onBlur={() => setEditingCard(null)}
-                      className="w-full min-h-[60px] text-xs bg-transparent outline-none resize-none text-foreground"
+                      onKeyDown={(e) => {
+                        if (e.key === 'Escape') setEditingCard(null);
+                      }}
+                      className="w-full text-xs text-foreground bg-transparent outline-none resize-none font-sans overflow-hidden min-h-[60px]"
+                      placeholder="Write something..."
                     />
                   ) : (
                     <>
                       <p className="font-display text-[13px] font-medium text-foreground">{title}</p>
-                      {body && <p className="text-xs text-muted-foreground mt-1 line-clamp-5">{body}</p>}
+                      <div className="text-[12px] leading-relaxed text-muted-foreground mt-1 line-clamp-6 overflow-hidden pointer-events-none">
+                        {renderMarkdown(body, handleLinkClick)}
+                      </div>
                     </>
                   )}
 
@@ -768,25 +820,43 @@ export default function CanvasView() {
                   )}
                 </div>
 
-                {/* Connection handles (visible on hover) */}
-                {isHovered && !isEditMode && !drawingArrow && (
+                {/* Connection handles (visible on hover or when drawing) */}
+                {(isHovered || (drawingArrow && drawingArrow.fromCardId !== card.id)) && !isEditMode && (
                   <>
                     {handles.map((side) => {
-                      const w = card.width || 240, h = 100;
-                      let hx = 0, hy = 0;
-                      if (side === 'top') { hx = w / 2; hy = 0; }
-                      if (side === 'bottom') { hx = w / 2; hy = h; }
-                      if (side === 'left') { hx = 0; hy = h / 2; }
-                      if (side === 'right') { hx = w; hy = h / 2; }
+                      let style = {};
+                      if (side === 'top') style = { top: -4, left: '50%', marginLeft: -4 };
+                      if (side === 'bottom') style = { bottom: -4, left: '50%', marginLeft: -4 };
+                      if (side === 'left') style = { left: -4, top: '50%', marginTop: -4 };
+                      if (side === 'right') style = { right: -4, top: '50%', marginTop: -4 };
 
                       return (
                         <div
                           key={side}
                           data-handle
-                          className="absolute w-2 h-2 rounded-full bg-background border-[1.5px] border-accent cursor-crosshair z-10"
-                          style={{ left: hx - 4, top: hy - 4 }}
-                          onMouseDown={(e) => startArrowDraw(card.id, side, e)}
-                        />
+                          className={`absolute w-3 h-3 flex items-center justify-center z-10 ${
+                            drawingArrow ? 'cursor-alias' : 'cursor-crosshair'
+                          }`}
+                          style={style}
+                          onDragStart={(e) => e.preventDefault()}
+                          onMouseDown={(e) => !drawingArrow && startArrowDraw(card.id, side, e)}
+                          onMouseUp={(e) => {
+                            if (drawingArrow && drawingArrow.fromCardId !== card.id) {
+                              e.stopPropagation();
+                              const newArrow: CanvasArrow = {
+                                id: `ca-${Date.now()}`,
+                                fromCardId: drawingArrow.fromCardId,
+                                toCardId: card.id,
+                                fromSide: drawingArrow.fromSide as any,
+                                toSide: side,
+                              };
+                              updateArrows([...arrows, newArrow]);
+                              setDrawingArrow(null);
+                            }
+                          }}
+                        >
+                          <div className="w-2 h-2 rounded-full bg-background border-[1.5px] border-accent" />
+                        </div>
                       );
                     })}
                   </>
@@ -812,7 +882,6 @@ export default function CanvasView() {
           { id: 'select' as CanvasTool, icon: MousePointer2, label: 'Select (V)' },
           { id: 'card' as CanvasTool, icon: Plus, label: 'Card' },
           { id: 'frame' as CanvasTool, icon: Square, label: 'Frame (R)' },
-          { id: 'circle' as CanvasTool, icon: Circle, label: 'Circle Select (C)' },
           { id: 'ink' as CanvasTool, icon: Pencil, label: 'Ink (I)' },
         ]).map((t) => (
           <button
@@ -844,8 +913,8 @@ export default function CanvasView() {
                 <button
                   key={color}
                   onClick={() => setInkColor(color)}
-                  className={`w-4 h-4 rounded-full transition-spring-micro ${inkColor === color ? 'ring-2 ring-popover-foreground/40 ring-offset-1 ring-offset-popover' : ''}`}
-                  style={{ backgroundColor: color }}
+                  className={`w-4 h-4 rounded-full transition-spring-micro ${inkColor === color ? 'ring-2 ring-popover-foreground/40 ring-offset-1 ring-offset-popover' : ''} ${color.startsWith('hsl') ? 'bg-foreground' : ''}`}
+                  style={color.startsWith('#') ? { backgroundColor: color } : {}}
                 />
               ))}
             </div>

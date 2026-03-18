@@ -401,7 +401,7 @@ export default function FocusTimer() {
                     <button
                       key={m}
                       onClick={() => selectDuration(m)}
-                      className={`px-3 py-1 rounded-full text-xs border transition-spring-micro ${
+                      className={`px-3 py-1 rounded-full text-xs border transition-colors duration-200 ${
                         duration === m * 60
                           ? 'bg-popover-foreground/15 text-popover-foreground border-popover-foreground/30'
                           : 'text-popover-foreground/60 border-popover-foreground/20 hover:border-popover-foreground/40'
@@ -425,7 +425,7 @@ export default function FocusTimer() {
                     <button
                       key={s.id}
                       onClick={() => setSound(s.id)}
-                      className={`flex-1 py-1.5 rounded-md text-xs transition-spring-micro ${
+                      className={`flex-1 py-1.5 rounded-md text-xs transition-colors duration-200 ${
                         sound === s.id
                           ? 'bg-accent/40 text-popover-foreground'
                           : 'text-popover-foreground/50 hover:text-popover-foreground/70'
@@ -454,7 +454,7 @@ export default function FocusTimer() {
                 {!running ? (
                   <button
                     onClick={handleStart}
-                    className="w-full py-2.5 bg-accent text-accent-foreground rounded-lg font-display text-sm transition-spring-micro hover:opacity-90"
+                    className="w-full py-2.5 bg-accent text-accent-foreground rounded-lg font-display text-sm transition-colors duration-200 hover:opacity-90"
                   >
                     ▶ Start
                   </button>
@@ -462,7 +462,7 @@ export default function FocusTimer() {
                   <div className="flex gap-2">
                     <button
                       onClick={handlePause}
-                      className="flex-1 py-2.5 text-popover-foreground/60 rounded-lg text-sm transition-spring-micro hover:text-popover-foreground"
+                      className="flex-1 py-2.5 text-popover-foreground/60 rounded-lg text-sm transition-colors duration-200 hover:text-popover-foreground"
                     >
                       ⏸ Pause
                     </button>
@@ -470,7 +470,7 @@ export default function FocusTimer() {
                       onMouseDown={handleResetDown}
                       onMouseUp={handleResetUp}
                       onMouseLeave={handleResetUp}
-                      className="flex-1 py-2.5 text-popover-foreground/60 rounded-lg text-sm transition-spring-micro hover:text-popover-foreground relative overflow-hidden"
+                      className="flex-1 py-2.5 text-popover-foreground/60 rounded-lg text-sm transition-colors duration-200 hover:text-popover-foreground relative overflow-hidden"
                     >
                       {resetHolding && (
                         <div

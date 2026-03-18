@@ -1,82 +1,9 @@
-import React, { useState, useRef, useCallback, useEffect, useMemo } from 'react';
+import React, { useState, useRef, useCallback, useEffect, useLayoutEffect, useMemo } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
+import { BookOpen, Pencil } from 'lucide-react';
 import { useAppStore } from '../store/appStore';
 
-function extractWikiLinks(content: string): string[] {
-  const matches = content.match(/\[\[([^\]]+)\]\]/g);
-  if (!matches) return [];
-  return matches.map((m) => m.slice(2, -2));
-}
-
-function renderMarkdown(text: string, onLinkClick: (title: string) => void): React.ReactNode[] {
-  const lines = text.split('\n');
-  const elements: React.ReactNode[] = [];
-
-  lines.forEach((line, i) => {
-    const key = `line-${i}`;
-    if (line.startsWith('# ')) {
-      elements.push(<h1 key={key} className="font-display text-2xl font-semibold text-foreground mt-6 mb-2">{renderInline(line.slice(2), onLinkClick)}</h1>);
-    } else if (line.startsWith('## ')) {
-      elements.push(<h2 key={key} className="font-display text-lg font-medium text-foreground mt-5 mb-2">{renderInline(line.slice(3), onLinkClick)}</h2>);
-    } else if (line.startsWith('> ')) {
-      elements.push(
-        <blockquote key={key} className="border-l-2 border-accent pl-3 my-2 text-muted-foreground italic">
-          {renderInline(line.slice(2), onLinkClick)}
-        </blockquote>
-      );
-    } else if (line === '---') {
-      elements.push(<hr key={key} className="my-6 border-border" />);
-    } else if (line.match(/^(\d+)\.\s/)) {
-      const content = line.replace(/^\d+\.\s/, '');
-      elements.push(
-        <div key={key} className="flex gap-2 my-0.5">
-          <span className="text-muted-foreground">{line.match(/^(\d+)/)?.[1]}.</span>
-          <span>{renderInline(content, onLinkClick)}</span>
-        </div>
-      );
-    } else if (line.startsWith('- ')) {
-      elements.push(
-        <div key={key} className="flex gap-2 my-0.5 ml-1">
-          <span className="text-accent mt-0.5">•</span>
-          <span>{renderInline(line.slice(2), onLinkClick)}</span>
-        </div>
-      );
-    } else if (line.trim() === '') {
-      elements.push(<div key={key} className="h-3" />);
-    } else {
-      elements.push(<p key={key} className="my-1">{renderInline(line, onLinkClick)}</p>);
-    }
-  });
-
-  return elements;
-}
-
-function renderInline(text: string, onLinkClick: (title: string) => void): React.ReactNode {
-  const parts: React.ReactNode[] = [];
-  const regex = /(\*\*(.+?)\*\*|\*(.+?)\*|`(.+?)`|\[\[(.+?)\]\])/g;
-  let match;
-  let lastIndex = 0;
-  let idx = 0;
-
-  while ((match = regex.exec(text)) !== null) {
-    if (match.index > lastIndex) parts.push(text.slice(lastIndex, match.index));
-    if (match[2]) parts.push(<strong key={idx++} className="font-semibold">{match[2]}</strong>);
-    else if (match[3]) parts.push(<em key={idx++} className="italic">{match[3]}</em>);
-    else if (match[4]) parts.push(<code key={idx++} className="font-mono text-sm bg-surface-active px-1 py-0.5 rounded">{match[4]}</code>);
-    else if (match[5]) {
-      const linkTitle = match[5];
-      parts.push(
-        <button key={idx++} onClick={(e) => { e.stopPropagation(); onLinkClick(linkTitle); }}
-          className="text-accent font-medium border-b border-dotted border-accent/50 hover:border-accent transition-spring-micro">
-          {linkTitle}
-        </button>
-      );
-    }
-    lastIndex = match.index + match[0].length;
-  }
-  if (lastIndex < text.length) parts.push(text.slice(lastIndex));
-  return parts.length === 1 ? parts[0] : <>{parts}</>;
-}
+import { extractWikiLinks, renderMarkdown } from '../utils/markdown';
 
 // Slash command definitions
 const slashCommands = [
@@ -116,6 +43,23 @@ export default function NoteEditor() {
     }
   }, [activeNoteId]);
 
+  const scrollPosRef = useRef<number>(0);
+
+  // Auto-resize textarea before repaint
+  useLayoutEffect(() => {
+    if (isEditing && contentRef.current) {
+      const textarea = contentRef.current;
+      textarea.style.height = 'auto';
+      textarea.style.height = `${textarea.scrollHeight}px`;
+      
+      const scrollContainer = editorContainerRef.current?.parentElement;
+      if (scrollContainer && scrollPosRef.current > 0) {
+        scrollContainer.scrollTop = scrollPosRef.current;
+        scrollPosRef.current = 0; // reset after restoring once
+      }
+    }
+  }, [isEditing, editContent]);
+
   const handleLinkClick = useCallback((title: string) => {
     const target = notes.find((n) => n.title.toLowerCase() === title.toLowerCase());
     if (target) setActiveNoteId(target.id);
@@ -128,10 +72,16 @@ export default function NoteEditor() {
     ));
   }, [note, notes]);
 
-  const startEditing = () => {
+  const startEditing = (target: 'title' | 'content' = 'content') => {
     if (!note) return;
+    const scrollContainer = editorContainerRef.current?.parentElement;
+    if (scrollContainer) scrollPosRef.current = scrollContainer.scrollTop;
+    
     setIsEditing(true);
-    setTimeout(() => contentRef.current?.focus(), 50);
+    setTimeout(() => {
+      if (target === 'title') titleRef.current?.focus({ preventScroll: true });
+      else contentRef.current?.focus({ preventScroll: true });
+    }, 0);
   };
 
   const saveEdit = () => {
@@ -273,18 +223,39 @@ export default function NoteEditor() {
         transition={{ type: 'spring', stiffness: 300, damping: 30 }}
         className="flex-1 overflow-y-auto"
       >
-        <div ref={editorContainerRef} className="max-w-[680px] mx-auto px-8 py-12 relative">
+        <div ref={editorContainerRef} className="w-full px-6 py-6 relative group">
+          {/* Read/Edit Toggle */}
+          <button
+            onClick={() => {
+              if (isEditing) saveEdit();
+              else startEditing('content');
+            }}
+            className={`absolute top-6 right-6 p-2 rounded-md transition-all duration-200 z-10 ${
+              isEditing 
+                ? 'text-accent bg-accent/10 hover:bg-accent/20' 
+                : 'text-muted-foreground opacity-0 group-hover:opacity-100 hover:text-foreground hover:bg-surface-hover'
+            }`}
+            title={isEditing ? 'Switch to Read Mode' : 'Switch to Edit Mode'}
+          >
+            {isEditing ? <BookOpen size={16} /> : <Pencil size={16} />}
+          </button>
+
           {/* Title */}
           {isEditing ? (
             <input
               ref={titleRef}
               value={editTitle}
               onChange={(e) => setEditTitle(e.target.value)}
+              onBlur={saveEdit}
+              onKeyDown={(e) => {
+                if (e.key === 'Enter') contentRef.current?.focus();
+                if (e.key === 'Escape') saveEdit();
+              }}
               placeholder="Untitled"
-              className="w-full font-display text-2xl font-normal text-foreground bg-transparent outline-none placeholder:text-muted-foreground/50 mb-6"
+              className="w-full font-display text-2xl font-normal text-foreground bg-transparent outline-none placeholder:text-muted-foreground/50 mb-3"
             />
           ) : (
-            <h1 onClick={startEditing} className="font-display text-2xl font-normal text-foreground mb-6 cursor-text">
+            <h1 onClick={() => startEditing('title')} className="font-display text-2xl font-normal text-foreground mb-3 cursor-text">
               {note.title || <span className="text-muted-foreground/50">Untitled</span>}
             </h1>
           )}
@@ -298,8 +269,9 @@ export default function NoteEditor() {
                 onChange={handleContentChange}
                 onBlur={() => { if (!slashOpen) saveEdit(); }}
                 onKeyDown={handleContentKeyDown}
-                className="w-full min-h-[60vh] text-[15px] leading-[1.7] text-foreground bg-transparent outline-none resize-none font-sans"
+                className="w-full text-[15px] leading-[1.7] text-foreground bg-transparent outline-none resize-none font-sans overflow-hidden"
                 placeholder="Start writing... (type / for commands)"
+                style={{ minHeight: '60vh' }}
               />
 
               {/* Slash command menu */}
@@ -318,7 +290,7 @@ export default function NoteEditor() {
                       <button
                         key={cmd.label}
                         onClick={() => executeSlashCommand(cmd)}
-                        className={`w-full flex items-center gap-3 px-3 py-2 text-left transition-spring-micro ${
+                        className={`w-full flex items-center gap-3 px-3 py-2 text-left transition-colors duration-200 ${
                           i === slashIndex ? 'bg-surface-active' : 'hover:bg-surface-hover'
                         }`}
                       >
@@ -334,7 +306,7 @@ export default function NoteEditor() {
               </AnimatePresence>
             </div>
           ) : (
-            <div onClick={startEditing} className="text-[15px] leading-[1.7] text-foreground cursor-text min-h-[200px]">
+            <div onClick={() => startEditing('content')} className="text-[15px] leading-[1.7] text-foreground cursor-text min-h-[200px]">
               {note.content ? renderMarkdown(note.content, handleLinkClick) : (
                 <p className="text-muted-foreground/50">Start writing...</p>
               )}
