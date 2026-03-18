@@ -16,7 +16,7 @@
     --card-foreground: 20 12% 10%;
 
     --popover: 20 12% 10%;            /* dark floating UI */
-    --popover-foreground: 36 33% 97%;
+    --popover-foreground: 28 25 23;
 
     --primary: 20 12% 10%;            /* #1C1917 */
     --primary-foreground: 36 33% 97%;
@@ -55,6 +55,33 @@
     --sidebar-border: 30 14% 89%;
     --sidebar-ring: 30 33% 41%;
   }
+
+  .dark {
+    --background: 15 14 13;
+    --surface: 26 25 22;
+    --surface-active: 36 34 32;
+    --surface-hover: 36 34 32;
+    --accent: 30 18% 41%; /* Kept hue roughly similar, user specified accent #8B6F47 is unchanged */
+    --accent-soft: 139 111 71 / 0.15;
+    --foreground: 240 237 232;
+    --muted-foreground: 107 101 96;
+    --border: 255 255 255 / 0.07;
+    --popover: 26 25 22;
+    --popover-foreground: 240 237 232;
+    --card: 30 25 26; /* #1E1C1A */
+    --card-foreground: 240 237 232;
+    --dot-grid: 255 255 255 / 0.06;
+  }
+}
+
+/* Theme Global Transition */
+body, 
+.bg-background, .bg-surface, .bg-surface-active, .bg-surface-hover, .bg-popover,
+.text-foreground, .text-muted-foreground,
+.border-border, .border-l, .border-r, .border-t, .border-b, .border {
+  transition-property: background-color, border-color, color;
+  transition-duration: 300ms;
+  transition-timing-function: ease;
 }
 
 @layer base {

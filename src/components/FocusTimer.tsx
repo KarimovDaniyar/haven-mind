@@ -1,8 +1,9 @@
-import React, { useState, useRef, useEffect, useCallback } from 'react';
+import React, { useState, useRef, useEffect, useCallback, useMemo } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
+import { ChevronRight, ChevronLeft, Pause } from 'lucide-react';
 import { useAppStore } from '../store/appStore';
 
-type AmbientSound = 'off' | 'rain' | 'white';
+type AmbientSound = 'off' | 'rain' | 'white' | 'hum';
 
 interface AudioState {
   ctx: AudioContext;
@@ -11,46 +12,47 @@ interface AudioState {
 }
 
 export default function FocusTimer() {
-  const { addTimerSession, timerOpen, setTimerOpen, setTimerRunning } = useAppStore();
+  const { addTimerSession, timerRunning, setTimerRunning, rocketPanelCollapsed, setRocketPanelCollapsed } = useAppStore();
 
   const [duration, setDuration] = useState(25 * 60);
   const [remaining, setRemaining] = useState(25 * 60);
   const [running, setRunning] = useState(false);
+  const [isPaused, setIsPaused] = useState(false);
   const [sound, setSound] = useState<AmbientSound>('off');
-  const [volume, setVolume] = useState(0.3);
-  const [sessionsToday, setSessionsToday] = useState(0);
-  const [minutesToday, setMinutesToday] = useState(0);
-  const [editingTime, setEditingTime] = useState(false);
-  const [editTimeValue, setEditTimeValue] = useState('');
-  const [resetHolding, setResetHolding] = useState(false);
-  const [resetProgress, setResetProgress] = useState(0);
-
+  const [isDark, setIsDark] = useState(() => typeof document !== 'undefined' ? document.documentElement.classList.contains('dark') : false);
+  
+  const [customMin, setCustomMin] = useState('');
+  const [aborting, setAborting] = useState(false);
+  const [arrivedGlow, setArrivedGlow] = useState(false);
+  
   const intervalRef = useRef<ReturnType<typeof setInterval> | null>(null);
   const audioRef = useRef<AudioState | null>(null);
-  const resetTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
-  const resetAnimRef = useRef<ReturnType<typeof requestAnimationFrame> | null>(null);
-  const resetStartRef = useRef(0);
+  const abortTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
-  // Dragging
-  const [position, setPosition] = useState({ right: 24, bottom: 24 });
-  const dragRef = useRef<{ startX: number; startY: number; startRight: number; startBottom: number } | null>(null);
-
-  const progress = duration > 0 ? 1 - remaining / duration : 0;
-
-  // Sync running state to store
+  // Sync running state to global store (for overlay)
   useEffect(() => {
-    setTimerRunning(running);
-  }, [running, setTimerRunning]);
+    setTimerRunning(running && !isPaused);
+  }, [running, isPaused, setTimerRunning]);
 
-  // Countdown
+  // Stars Generation
+  const stars = useMemo(() => Array.from({ length: 40 }).map((_, i) => ({
+    id: i,
+    size: Math.random() < 0.6 ? 1 : Math.random() < 0.9 ? 1.5 : 2,
+    left: Math.random() * 128,
+    startTop: Math.random() * 100,
+    opacity: 0.3 + Math.random() * 0.5,
+    speedIdle: 20 + Math.random() * 40,
+    speedFlying: 8 + Math.random() * 7,
+  })), []);
+
+  // Timer Tick
   useEffect(() => {
-    if (running && remaining > 0) {
+    if (running && !isPaused && remaining > 0) {
       intervalRef.current = setInterval(() => {
         setRemaining((t) => {
           if (t <= 1) {
             clearInterval(intervalRef.current!);
             intervalRef.current = null;
-            setRunning(false);
             handleComplete();
             return 0;
           }
@@ -59,216 +61,166 @@ export default function FocusTimer() {
       }, 1000);
     }
     return () => {
-      if (intervalRef.current) {
-        clearInterval(intervalRef.current);
-        intervalRef.current = null;
-      }
+      if (intervalRef.current) clearInterval(intervalRef.current);
     };
-  }, [running]);
+  }, [running, isPaused, remaining]);
+
+  // Sync theme
+  useEffect(() => {
+    const handleThemeChange = () => setIsDark(document.documentElement.classList.contains('dark'));
+    window.addEventListener('theme-change', handleThemeChange);
+    return () => window.removeEventListener('theme-change', handleThemeChange);
+  }, []);
+
+  const stopSound = useCallback(() => {
+    if (audioRef.current) {
+      const { ctx, gain, sources } = audioRef.current;
+      gain.gain.setTargetAtTime(0, ctx.currentTime, 1);
+      setTimeout(() => {
+        sources.forEach(s => s.stop());
+        ctx.close();
+        audioRef.current = null;
+      }, 2000);
+    }
+  }, []);
 
   const handleComplete = useCallback(() => {
-    // Chime: sine 440→880hz
+    // Arrival sequence
+    setArrivedGlow(true);
+    setRunning(false);
+    
+    // Multi-tone chime
     try {
       const ctx = new AudioContext();
-      const osc = ctx.createOscillator();
-      const gain = ctx.createGain();
-      osc.connect(gain);
-      gain.connect(ctx.destination);
-      osc.frequency.setValueAtTime(440, ctx.currentTime);
-      osc.frequency.exponentialRampToValueAtTime(880, ctx.currentTime + 0.3);
-      gain.gain.setValueAtTime(0.2, ctx.currentTime);
-      gain.gain.exponentialRampToValueAtTime(0.001, ctx.currentTime + 0.5);
-      osc.start(ctx.currentTime);
-      osc.stop(ctx.currentTime + 0.5);
-      setTimeout(() => ctx.close(), 1000);
+      const playTone = (freq: number, startTime: number) => {
+        const osc = ctx.createOscillator();
+        const gain = ctx.createGain();
+        osc.connect(gain);
+        gain.connect(ctx.destination);
+        osc.frequency.value = freq;
+        gain.gain.setValueAtTime(0, ctx.currentTime + startTime);
+        gain.gain.linearRampToValueAtTime(0.2, ctx.currentTime + startTime + 0.05);
+        gain.gain.exponentialRampToValueAtTime(0.001, ctx.currentTime + startTime + 1.5);
+        osc.start(ctx.currentTime + startTime);
+        osc.stop(ctx.currentTime + startTime + 1.5);
+      };
+      playTone(440, 0);
+      playTone(880, 0.15);
+      playTone(1320, 0.3);
+      setTimeout(() => ctx.close(), 2000);
     } catch (e) {}
 
     const today = new Date().toISOString().split('T')[0];
     const mins = Math.round(duration / 60);
     addTimerSession({ date: today, minutes: mins, completedAt: Date.now() });
-    setSessionsToday((s) => s + 1);
-    setMinutesToday((m) => m + mins);
 
-    // Fade out ambient sound
-    stopSound(3);
-  }, [duration, addTimerSession]);
+    stopSound();
 
-  // ---- RAIN SOUND ----
-  const startRain = useCallback((ctx: AudioContext, masterGain: GainNode) => {
-    const frequencies = [200, 400, 800, 1200, 2000, 3000, 5000, 8000];
-    const sources: AudioBufferSourceNode[] = [];
-    const bufferSize = ctx.sampleRate * 2;
+    setTimeout(() => {
+      setArrivedGlow(false);
+      setRemaining(duration);
+    }, 2000);
+  }, [duration, addTimerSession, stopSound]);
 
-    frequencies.forEach((freq, i) => {
-      const buffer = ctx.createBuffer(1, bufferSize, ctx.sampleRate);
-      const data = buffer.getChannelData(0);
-      for (let j = 0; j < bufferSize; j++) {
-        data[j] = Math.random() * 2 - 1;
-      }
-
-      const source = ctx.createBufferSource();
-      source.buffer = buffer;
-      source.loop = true;
-
-      const filter = ctx.createBiquadFilter();
-      filter.type = 'bandpass';
-      filter.frequency.value = freq;
-      filter.Q.value = 0.5;
-
-      const nodeGain = ctx.createGain();
-      nodeGain.gain.value = 0.08;
-
-      // LFO for amplitude modulation
-      const lfo = ctx.createOscillator();
-      const lfoGain = ctx.createGain();
-      lfo.frequency.value = 0.1 + Math.random() * 0.4;
-      lfoGain.gain.value = 0.03;
-      lfo.connect(lfoGain);
-      lfoGain.connect(nodeGain.gain);
-      lfo.start();
-
-      source.connect(filter);
-      filter.connect(nodeGain);
-      nodeGain.connect(masterGain);
-      source.start();
-      sources.push(source);
-    });
-
-    return sources;
-  }, []);
-
-  // ---- WHITE NOISE ----
-  const startWhiteNoise = useCallback((ctx: AudioContext, masterGain: GainNode) => {
-    const bufferSize = ctx.sampleRate * 2;
-    const buffer = ctx.createBuffer(1, bufferSize, ctx.sampleRate);
-    const data = buffer.getChannelData(0);
-    for (let i = 0; i < bufferSize; i++) {
-      data[i] = Math.random() * 2 - 1;
+  // Audio Engine
+  useEffect(() => {
+    if (sound === 'off' || !running || isPaused) {
+      stopSound();
+      return;
     }
-
-    const source = ctx.createBufferSource();
-    source.buffer = buffer;
-    source.loop = true;
-
-    const filter = ctx.createBiquadFilter();
-    filter.type = 'lowpass';
-    filter.frequency.value = 800;
-
-    const nodeGain = ctx.createGain();
-    nodeGain.gain.value = 0.04;
-
-    source.connect(filter);
-    filter.connect(nodeGain);
-    nodeGain.connect(masterGain);
-    source.start();
-    return [source];
-  }, []);
-
-  const startSound = useCallback((type: AmbientSound) => {
-    stopSound(0);
-    if (type === 'off') return;
-
     try {
       const ctx = new AudioContext();
-      const gain = ctx.createGain();
-      gain.gain.setValueAtTime(0, ctx.currentTime);
-      gain.gain.linearRampToValueAtTime(volume, ctx.currentTime + 2);
-      gain.connect(ctx.destination);
+      const masterGain = ctx.createGain();
+      masterGain.connect(ctx.destination);
+      masterGain.gain.value = 0;
+      masterGain.gain.linearRampToValueAtTime(1, ctx.currentTime + 2);
+      
+      const sources: AudioBufferSourceNode[] = [];
 
-      const sources = type === 'rain' ? startRain(ctx, gain) : startWhiteNoise(ctx, gain);
-      audioRef.current = { ctx, gain, sources };
-    } catch (e) {}
-  }, [volume, startRain, startWhiteNoise]);
-
-  const stopSound = useCallback((fadeTime: number = 2) => {
-    const audio = audioRef.current;
-    if (!audio) return;
-    try {
-      const { ctx, gain, sources } = audio;
-      if (fadeTime > 0) {
-        gain.gain.linearRampToValueAtTime(0, ctx.currentTime + fadeTime);
-        setTimeout(() => {
-          sources.forEach((s) => { try { s.stop(); } catch(e) {} });
-          ctx.close();
-        }, fadeTime * 1000 + 200);
-      } else {
-        sources.forEach((s) => { try { s.stop(); } catch(e) {} });
-        ctx.close();
+      if (sound === 'white' || sound === 'rain') {
+        const bufferSize = ctx.sampleRate * 2; // 2 seconds
+        const buffer = ctx.createBuffer(1, bufferSize, ctx.sampleRate);
+        const data = buffer.getChannelData(0);
+        for (let i = 0; i < bufferSize; i++) data[i] = Math.random() * 2 - 1;
+        
+        const noise = ctx.createBufferSource();
+        noise.buffer = buffer;
+        noise.loop = true;
+        
+        const filter = ctx.createBiquadFilter();
+        if (sound === 'rain') {
+          filter.type = 'lowpass';
+          filter.frequency.value = 400;
+          masterGain.gain.value = 0.5;
+        } else {
+          filter.type = 'lowpass';
+          filter.frequency.value = 1000;
+          masterGain.gain.value = 0.1;
+        }
+        
+        noise.connect(filter);
+        filter.connect(masterGain);
+        noise.start();
+        sources.push(noise);
+      } else if (sound === 'hum') {
+        const osc1 = ctx.createOscillator();
+        osc1.frequency.value = 60;
+        const osc2 = ctx.createOscillator();
+        osc2.frequency.value = 120;
+        
+        masterGain.gain.value = 0.02;
+        osc1.connect(masterGain);
+        osc2.connect(masterGain);
+        osc1.start();
+        osc2.start();
+        // push dummy source with stop method
+        sources.push({ stop: () => { osc1.stop(); osc2.stop(); } } as any);
       }
-      audioRef.current = null;
+
+      audioRef.current = { ctx, gain: masterGain, sources };
     } catch (e) {}
-  }, []);
 
-  // Sound toggle
-  useEffect(() => {
-    if (running && sound !== 'off') {
-      startSound(sound);
-    } else if (!running || sound === 'off') {
-      stopSound(2);
-    }
-    return () => {};
-  }, [sound, running]);
+    return stopSound;
+  }, [sound, running, isPaused, stopSound]);
 
-  // Volume adjustment
-  useEffect(() => {
-    if (audioRef.current) {
-      const { ctx, gain } = audioRef.current;
-      gain.gain.linearRampToValueAtTime(running ? volume : volume * 0.3, ctx.currentTime + 0.3);
-    }
-  }, [volume, running]);
-
-  const handleStart = () => {
-    if (remaining <= 0) setRemaining(duration);
-    setRunning(true);
+  const selectDuration = (m: number) => {
+    const d = m * 60;
+    setDuration(d);
+    setRemaining(d);
+    setCustomMin('');
   };
 
-  const handlePause = () => {
-    setRunning(false);
-    if (intervalRef.current) {
-      clearInterval(intervalRef.current);
-      intervalRef.current = null;
-    }
-    // Quiet sound to 30%
-    if (audioRef.current) {
-      const { ctx, gain } = audioRef.current;
-      gain.gain.linearRampToValueAtTime(volume * 0.3, ctx.currentTime + 0.5);
+  const handleCustomChange = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const val = e.target.value.replace(/[^0-9]/g, '');
+    setCustomMin(val);
+    if (val) {
+      const d = parseInt(val, 10) * 60;
+      setDuration(d);
+      setRemaining(d);
     }
   };
 
-  // Reset with 500ms hold
-  const handleResetDown = () => {
-    setResetHolding(true);
-    resetStartRef.current = Date.now();
-    const animate = () => {
-      const elapsed = Date.now() - resetStartRef.current;
-      const p = Math.min(1, elapsed / 500);
-      setResetProgress(p);
-      if (p < 1) {
-        resetAnimRef.current = requestAnimationFrame(animate);
-      } else {
-        // Reset!
-        if (intervalRef.current) clearInterval(intervalRef.current);
-        intervalRef.current = null;
-        setRunning(false);
-        setRemaining(duration);
-        setResetHolding(false);
-        setResetProgress(0);
-        stopSound(1);
-      }
-    };
-    resetAnimRef.current = requestAnimationFrame(animate);
+  const launch = () => {
+    if (remaining > 0) {
+      setRunning(true);
+      setIsPaused(false);
+    }
   };
 
-  const handleResetUp = () => {
-    setResetHolding(false);
-    setResetProgress(0);
-    if (resetAnimRef.current) cancelAnimationFrame(resetAnimRef.current);
+  const startAbort = () => {
+    setAborting(true);
+    abortTimerRef.current = setTimeout(() => {
+      setRunning(false);
+      setIsPaused(false);
+      setRemaining(duration);
+      setAborting(false);
+      stopSound();
+    }, 600);
   };
 
-  const selectDuration = (mins: number) => {
-    const secs = mins * 60;
-    setDuration(secs);
-    setRemaining(secs);
+  const cancelAbort = () => {
+    setAborting(false);
+    if (abortTimerRef.current) clearTimeout(abortTimerRef.current);
   };
 
   const formatTime = (secs: number) => {
@@ -277,225 +229,294 @@ export default function FocusTimer() {
     return `${m.toString().padStart(2, '0')}:${s.toString().padStart(2, '0')}`;
   };
 
-  const handleTimeEdit = () => {
-    if (running) return;
-    setEditingTime(true);
-    setEditTimeValue(formatTime(remaining));
+  const isFlying = running && !isPaused;
+
+  const getPlanetInfo = () => {
+    const m = duration / 60;
+    if (m <= 15) return { name: 'MOON', color: '#8A8A8A', size: 18 };
+    if (m <= 30) return { name: 'MARS', color: '#C1440E', size: 22 };
+    if (m <= 50) return { name: 'JUPITER', color: '#C88B3A', size: 32 };
+    if (m <= 70) return { name: 'SATURN', color: '#D4A843', size: 28 };
+    return { name: 'NEPTUNE', color: '#2E4482', size: 24 };
   };
 
-  const commitTimeEdit = () => {
-    setEditingTime(false);
-    const parts = editTimeValue.split(':');
-    if (parts.length === 2) {
-      const m = parseInt(parts[0], 10);
-      const s = parseInt(parts[1], 10);
-      if (!isNaN(m) && !isNaN(s)) {
-        const total = m * 60 + s;
-        setDuration(total);
-        setRemaining(total);
-      }
-    }
-  };
+  const planet = getPlanetInfo();
 
-  // Dragging the collapsed button
-  const handleDragStart = (e: React.MouseEvent) => {
-    e.preventDefault();
-    dragRef.current = {
-      startX: e.clientX,
-      startY: e.clientY,
-      startRight: position.right,
-      startBottom: position.bottom,
-    };
-    const handleMove = (ev: MouseEvent) => {
-      if (!dragRef.current) return;
-      const dx = ev.clientX - dragRef.current.startX;
-      const dy = ev.clientY - dragRef.current.startY;
-      setPosition({
-        right: Math.max(8, dragRef.current.startRight - dx),
-        bottom: Math.max(8, dragRef.current.startBottom - dy),
-      });
-    };
-    const handleUp = () => {
-      dragRef.current = null;
-      window.removeEventListener('mousemove', handleMove);
-      window.removeEventListener('mouseup', handleUp);
-    };
-    window.addEventListener('mousemove', handleMove);
-    window.addEventListener('mouseup', handleUp);
-  };
+  // Animation values
+  // Distance: Rocket is at 50% bottom when flying, planet starts offscreen top.
+  // Actually, let's map planet Y:
+  // idle: 40px from top
+  // flying: from -100px to window height / 2 (rocket position)
+  const windowHalf = typeof window !== 'undefined' ? window.innerHeight / 2 : 400;
+  const planetY = running 
+    ? (arrivedGlow ? windowHalf : -100 + ((duration - remaining) / duration) * (windowHalf + 100))
+    : 40;
 
-  const circumference = 2 * Math.PI * 18; // r=18
+  const rocketY = running ? '50%' : '70%';
 
   return (
     <>
-      <motion.div
-        className="fixed z-50"
-        style={{ right: position.right, bottom: position.bottom }}
+      <style>{`
+        @keyframes driftDown {
+          from { transform: translateY(-100%); }
+          to { transform: translateY(100vh); }
+        }
+        @keyframes rotateBlob {
+          from { transform: rotate(0deg); }
+          to { transform: rotate(360deg); }
+        }
+        @keyframes hoverRocket {
+          0% { transform: translateY(-4px) translateX(-50%); }
+          50% { transform: translateY(0px) translateX(-50%); }
+          100% { transform: translateY(-4px) translateX(-50%); }
+        }
+        @keyframes driftRocket {
+          0% { transform: translateX(calc(-50% - 2px)); }
+          50% { transform: translateX(calc(-50% + 2px)); }
+          100% { transform: translateX(calc(-50% - 2px)); }
+        }
+        @keyframes flickerFlame {
+          0% { transform: scaleY(0.8); }
+          50% { transform: scaleY(1.2); }
+          100% { transform: scaleY(0.8); }
+        }
+        @keyframes rotatePlanet {
+          from { transform: translateX(-50%) rotate(0deg); }
+          to { transform: translateX(-50%) rotate(360deg); }
+        }
+      `}</style>
+      
+      {/* Global Arrived Glow */}
+      <div 
+        className={`fixed inset-0 pointer-events-none z-40 transition-opacity duration-1000 ${arrivedGlow ? 'opacity-100' : 'opacity-0'}`}
+        style={{ boxShadow: 'inset -30px 0 60px rgba(139,111,71,0.2)' }}
+      />
+
+      <div 
+        className={`fixed right-0 top-0 h-screen bg-[#0D0D12] border-l z-50 flex flex-col items-center transition-transform duration-[400ms] cubic-bezier(0.175, 0.885, 0.32, 1.275)`}
+        style={{ 
+          width: 128, 
+          transform: `translateX(${rocketPanelCollapsed ? 124 : 0}px)`,
+          borderColor: isDark ? 'rgba(255,255,255,0.06)' : 'rgba(0,0,0,0.12)'
+        }}
       >
-        {!timerOpen && (
-          <motion.button
-            onClick={() => setTimerOpen(true)}
-            onMouseDown={handleDragStart}
-            whileHover={{ scale: 1.05 }}
-            className="w-11 h-11 rounded-full bg-popover flex items-center justify-center shadow-lg relative"
-            title={running ? formatTime(remaining) : 'Focus Timer'}
-          >
-            {/* Progress ring */}
-            <svg className="absolute inset-0 w-11 h-11 -rotate-90">
-              {running && (
-                <circle
-                  cx="22" cy="22" r="18"
-                  fill="none"
-                  stroke="hsl(var(--accent))"
-                  strokeWidth="2"
-                  strokeDasharray={circumference}
-                  strokeDashoffset={circumference * (remaining / duration)}
-                  strokeLinecap="round"
-                  style={{ transition: 'stroke-dashoffset 1s linear' }}
-                />
+        {/* Toggle Button */}
+        <button
+          onClick={() => setRocketPanelCollapsed(!rocketPanelCollapsed)}
+          className="absolute -left-3 top-4 w-6 h-6 bg-[#0D0D12] border border-white/10 rounded-full flex items-center justify-center text-white/30 hover:text-white/70 transition-colors z-50"
+        >
+          {rocketPanelCollapsed ? <ChevronLeft size={14} /> : <ChevronRight size={14} />}
+        </button>
+
+        {/* --- BACKGROUND LAYER --- */}
+        <div className="absolute inset-0 overflow-hidden pointer-events-none opacity-50">
+          <div className="absolute top-1/4 left-1/2 w-[200px] h-[200px] -translate-x-1/2 -translate-y-1/2 rounded-full blur-[40px] mix-blend-screen" style={{ background: 'radial-gradient(circle, rgba(139,111,71,0.15) 0%, transparent 70%)', animation: 'rotateBlob 120s linear infinite' }} />
+          <div className="absolute bottom-1/4 left-1/2 w-[180px] h-[180px] -translate-x-1/2 -translate-y-1/2 rounded-full blur-[40px] mix-blend-screen" style={{ background: 'radial-gradient(circle, rgba(107,78,140,0.12) 0%, transparent 70%)', animation: 'rotateBlob 90s reverse infinite' }} />
+        </div>
+
+        {/* Stars */}
+        <div className="absolute inset-0 overflow-hidden pointer-events-none">
+          {stars.map((s) => (
+            <div
+              key={s.id}
+              className="absolute bg-white rounded-full"
+              style={{
+                width: s.size,
+                height: s.size,
+                left: s.left,
+                opacity: arrivedGlow ? 0 : s.opacity,
+                transform: arrivedGlow ? 'scale(3)' : 'scale(1)',
+                transition: arrivedGlow ? 'all 0.6s ease-out' : 'none',
+                animation: `driftDown ${isFlying ? s.speedFlying : s.speedIdle}s linear infinite`,
+                animationDelay: `-${Math.random() * 20}s`
+              }}
+            />
+          ))}
+        </div>
+
+        {/* --- DYNAMIC SCENE --- */}
+
+        {/* Planet */}
+        <div 
+          className="absolute left-1/2 flex flex-col items-center pointer-events-none z-10"
+          style={{ transform: `translate(-50%, ${planetY}px)`, transition: running ? 'transform 1s linear' : 'transform 1s cubic-bezier(0.4, 0, 0.2, 1)' }}
+        >
+          <div className="relative" style={{ width: planet.size, height: planet.size, animation: !running ? 'rotatePlanet 30s linear infinite' : 'none' }}>
+            <svg width="100%" height="100%" viewBox={`0 0 ${planet.size} ${planet.size}`}>
+              <circle cx={planet.size/2} cy={planet.size/2} r={planet.size/2} fill={planet.color} />
+              {planet.name === 'MOON' && (
+                <>
+                  <circle cx={planet.size*0.3} cy={planet.size*0.4} r={planet.size*0.15} fill="rgba(0,0,0,0.2)" />
+                  <circle cx={planet.size*0.7} cy={planet.size*0.3} r={planet.size*0.1} fill="rgba(0,0,0,0.2)" />
+                  <circle cx={planet.size*0.6} cy={planet.size*0.7} r={planet.size*0.12} fill="rgba(0,0,0,0.2)" />
+                </>
+              )}
+              {planet.name === 'JUPITER' && (
+                <>
+                  <rect x="0" y={planet.size*0.2} width={planet.size} height={planet.size*0.15} fill="rgba(80,40,0,0.2)" />
+                  <rect x="0" y={planet.size*0.5} width={planet.size} height={planet.size*0.2} fill="rgba(80,40,0,0.3)" />
+                  <rect x="0" y={planet.size*0.8} width={planet.size} height={planet.size*0.1} fill="rgba(80,40,0,0.2)" />
+                </>
+              )}
+              {planet.name === 'SATURN' && (
+                <ellipse cx={planet.size/2} cy={planet.size/2} rx={planet.size*0.8} ry={planet.size*0.2} fill="none" stroke="#B8924A" strokeWidth="2" transform={`rotate(-20 ${planet.size/2} ${planet.size/2})`} />
               )}
             </svg>
-            <div className={`w-[18px] h-[18px] rounded-full border-[1.5px] flex items-center justify-center ${running ? 'border-accent animate-pulse-ring' : 'border-popover-foreground/60'}`}>
-              <div className={`w-1 h-1 rounded-full ${running ? 'bg-accent' : 'bg-popover-foreground/60'}`} />
-            </div>
-          </motion.button>
+          </div>
+          {(!running || arrivedGlow) && (
+            <span className="mt-2 text-[9px] font-sans tracking-[0.1em] font-medium" style={{ color: arrivedGlow ? '#6B8F71' : 'rgba(255,255,255,0.4)' }}>
+              {arrivedGlow ? 'ARRIVED' : planet.name}
+            </span>
+          )}
+        </div>
+
+        {/* Trajectory dotted line */}
+        {!running && (
+          <div 
+            className="absolute left-1/2 -translate-x-1/2 w-px border-l border-white/20 border-dotted opacity-30 z-0"
+            style={{ 
+              top: planetY + planet.size + 20, 
+              bottom: `calc(${100 - parseInt(rocketY)}% + 30px)` 
+            }} 
+          />
         )}
 
+        {/* Time display (Flying) */}
         <AnimatePresence>
-          {timerOpen && (
-            <motion.div
-              initial={{ scale: 0.8, opacity: 0 }}
-              animate={{ scale: 1, opacity: 1 }}
-              exit={{ scale: 0.8, opacity: 0 }}
-              transition={{ type: 'spring', stiffness: 400, damping: 25 }}
-              className="w-[280px] bg-popover rounded-2xl p-5 shadow-2xl"
-              style={{ position: 'absolute', bottom: 0, right: 0 }}
+          {running && (
+            <motion.div 
+              initial={{ opacity: 0, y: 20 }} animate={{ opacity: 1, y: 0 }} exit={{ opacity: 0, y: -20 }}
+              className="absolute left-0 w-full flex flex-col items-center pointer-events-none z-20"
+              style={{ top: `calc(${rocketY} - 80px)` }}
             >
-              <div className="fixed inset-0 z-[-1]" onClick={() => setTimerOpen(false)} />
-
-              {/* Timer display */}
-              <div className="text-center mb-4">
-                {editingTime ? (
-                  <input
-                    autoFocus
-                    value={editTimeValue}
-                    onChange={(e) => setEditTimeValue(e.target.value)}
-                    onBlur={commitTimeEdit}
-                    onKeyDown={(e) => { if (e.key === 'Enter') commitTimeEdit(); if (e.key === 'Escape') setEditingTime(false); }}
-                    className="font-display text-5xl font-light text-popover-foreground tracking-tight bg-transparent outline-none text-center w-full"
-                  />
-                ) : (
-                  <p
-                    className="font-display text-5xl font-light text-popover-foreground tracking-tight cursor-pointer"
-                    onClick={handleTimeEdit}
-                  >
-                    {formatTime(remaining)}
-                  </p>
-                )}
-              </div>
-
-              {/* Duration presets */}
-              {!running && (
-                <div className="flex gap-2 justify-center mb-4">
-                  {[15, 25, 45, 60].map((m) => (
-                    <button
-                      key={m}
-                      onClick={() => selectDuration(m)}
-                      className={`px-3 py-1 rounded-full text-xs border transition-colors duration-200 ${
-                        duration === m * 60
-                          ? 'bg-popover-foreground/15 text-popover-foreground border-popover-foreground/30'
-                          : 'text-popover-foreground/60 border-popover-foreground/20 hover:border-popover-foreground/40'
-                      }`}
-                    >
-                      {m}m
-                    </button>
-                  ))}
-                </div>
-              )}
-
-              {/* Sound selector */}
-              <div className="mb-4">
-                <p className="text-[11px] uppercase tracking-wider text-popover-foreground/40 mb-2">Ambient</p>
-                <div className="flex gap-2">
-                  {([
-                    { id: 'off' as AmbientSound, label: 'Off', icon: '☁' },
-                    { id: 'rain' as AmbientSound, label: 'Rain', icon: '🌧' },
-                    { id: 'white' as AmbientSound, label: 'Noise', icon: '~' },
-                  ]).map((s) => (
-                    <button
-                      key={s.id}
-                      onClick={() => setSound(s.id)}
-                      className={`flex-1 py-1.5 rounded-md text-xs transition-colors duration-200 ${
-                        sound === s.id
-                          ? 'bg-accent/40 text-popover-foreground'
-                          : 'text-popover-foreground/50 hover:text-popover-foreground/70'
-                      }`}
-                    >
-                      {s.icon} {s.label}
-                    </button>
-                  ))}
-                </div>
-                {sound !== 'off' && (
-                  <input
-                    type="range"
-                    min="0" max="1" step="0.05"
-                    value={volume}
-                    onChange={(e) => setVolume(parseFloat(e.target.value))}
-                    className="w-full mt-2 h-1.5 appearance-none rounded-full cursor-pointer"
-                    style={{
-                      background: `linear-gradient(to right, hsl(var(--accent)) ${volume * 100}%, rgba(249,247,244,0.15) ${volume * 100}%)`,
-                    }}
-                  />
-                )}
-              </div>
-
-              {/* Controls */}
-              <div className="space-y-2">
-                {!running ? (
-                  <button
-                    onClick={handleStart}
-                    className="w-full py-2.5 bg-accent text-accent-foreground rounded-lg font-display text-sm transition-colors duration-200 hover:opacity-90"
-                  >
-                    ▶ Start
-                  </button>
-                ) : (
-                  <div className="flex gap-2">
-                    <button
-                      onClick={handlePause}
-                      className="flex-1 py-2.5 text-popover-foreground/60 rounded-lg text-sm transition-colors duration-200 hover:text-popover-foreground"
-                    >
-                      ⏸ Pause
-                    </button>
-                    <button
-                      onMouseDown={handleResetDown}
-                      onMouseUp={handleResetUp}
-                      onMouseLeave={handleResetUp}
-                      className="flex-1 py-2.5 text-popover-foreground/60 rounded-lg text-sm transition-colors duration-200 hover:text-popover-foreground relative overflow-hidden"
-                    >
-                      {resetHolding && (
-                        <div
-                          className="absolute inset-0 bg-popover-foreground/10"
-                          style={{ width: `${resetProgress * 100}%`, transition: 'none' }}
-                        />
-                      )}
-                      <span className="relative">↺ Reset</span>
-                    </button>
-                  </div>
-                )}
-              </div>
-
-              {/* Session log */}
-              {(sessionsToday > 0 || minutesToday > 0) && (
-                <div className="mt-4 pt-3 border-t border-popover-foreground/10">
-                  <p className="text-[11px] text-popover-foreground/40">
-                    Today: {sessionsToday} session{sessionsToday !== 1 ? 's' : ''} · {minutesToday} min
-                  </p>
-                </div>
-              )}
+              <div className="font-display text-[28px] font-light text-[#F9F7F4] tracking-tight">{formatTime(remaining)}</div>
+              <div className="text-[8px] tracking-[0.1em] text-white/40 mt-1 uppercase">→ {planet.name}</div>
             </motion.div>
           )}
         </AnimatePresence>
-      </motion.div>
+
+        {/* Rocket */}
+        <div 
+          className="absolute left-1/2 w-6 h-12 z-20 pointer-events-none"
+          style={{ 
+            top: rocketY, 
+            animation: !running ? 'hoverRocket 4s ease-in-out infinite' : 'driftRocket 6s ease-in-out infinite',
+            transition: 'top 1s cubic-bezier(0.4, 0, 0.2, 1)' 
+          }}
+        >
+          <svg width="24" height="48" viewBox="0 0 24 48">
+            <rect x="0" y="6" width="24" height="38" rx="12" fill="#F9F7F4" />
+            <polygon points="0,32 -6,44 0,44" fill="#C4B09A" transform="translate(6, 0)" />
+            <polygon points="24,32 30,44 24,44" fill="#C4B09A" transform="translate(-6, 0)" />
+            <circle cx="12" cy="20" r="4" fill="none" stroke="#8B6F47" strokeWidth="1.5" />
+          </svg>
+          
+          {/* Flame */}
+          {running && !arrivedGlow && (
+            <div className="absolute left-1/2 -translate-x-1/2 top-full flex justify-center w-full" style={{ mixBlendMode: 'screen' }}>
+              <div className="w-4 h-6 rounded-b-full bg-gradient-to-b from-[#8B6F47] to-transparent opacity-60 absolute" style={{ animation: 'flickerFlame 200ms ease-in-out infinite alternate' }} />
+              <div className="w-2 h-4 rounded-b-full bg-white opacity-90 absolute top-0" style={{ animation: 'flickerFlame 150ms ease-in-out infinite alternate-reverse' }} />
+            </div>
+          )}
+        </div>
+
+        {/* Launchpad line */}
+        <AnimatePresence>
+          {!running && (
+            <motion.div 
+              initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }}
+              className="absolute left-1/2 -translate-x-1/2 h-px bg-white/10 w-[60px] z-10"
+              style={{ top: `calc(${rocketY} + 50px)` }}
+            />
+          )}
+        </AnimatePresence>
+
+
+        <div className="w-full h-full flex flex-col items-center z-30 relative py-6 px-4">
+          
+          {/* Middle: Presets (IDLE only) */}
+          <div className={`absolute top-[40%] -translate-y-1/2 flex flex-col items-center w-full transition-opacity duration-300 ${running ? 'opacity-0 pointer-events-none' : 'opacity-100'}`}>
+            <span className="text-[8px] text-white/30 tracking-[0.15em] mb-3">MISSION</span>
+            <div className="flex flex-col gap-1.5 w-full items-center">
+              {[15, 25, 45, 60, 90].map((m) => (
+                <button
+                  key={m}
+                  onClick={() => selectDuration(m)}
+                  className={`w-[56px] h-[24px] rounded-full text-[11px] font-medium transition-colors ${
+                    duration === m * 60
+                      ? 'border border-[#8B6F47] bg-[#8B6F47]/20 text-[#F9F7F4]'
+                      : 'border border-white/15 bg-transparent text-white/50 hover:bg-white/5'
+                  }`}
+                >
+                  {m}m
+                </button>
+              ))}
+              <input
+                value={customMin}
+                onChange={handleCustomChange}
+                placeholder="mm"
+                className="w-[56px] bg-transparent border-b border-white/20 text-[#F9F7F4] text-[12px] text-center mt-2 pb-0.5 outline-none focus:border-[#8B6F47] transition-colors placeholder:text-white/30"
+              />
+            </div>
+          </div>
+
+          {/* Bottom: Controls */}
+          <div className="flex flex-col items-center gap-4 mt-auto">
+            {/* Audio Toggles */}
+            <div className="flex gap-2">
+              <button 
+                onClick={() => setSound('off')} 
+                className={`text-[14px] transition-colors ${sound === 'off' ? 'text-white/80' : 'text-white/30 hover:text-white/50'}`}
+                title="Sound Off"
+              >☁</button>
+              <button 
+                onClick={() => setSound('white')} 
+                className={`text-[14px] transition-colors ${sound === 'white' ? 'text-white/80' : 'text-white/30 hover:text-white/50'}`}
+                title="White Noise"
+              >〜</button>
+              <button 
+                onClick={() => setSound('hum')} 
+                className={`text-[14px] transition-colors ${sound === 'hum' ? 'text-white/80' : 'text-white/30 hover:text-white/50'}`}
+                title="Space Hum"
+              >⚡</button>
+            </div>
+
+            {/* Launch / Abort */}
+            {!running ? (
+              <button
+                onClick={launch}
+                className="w-[80px] h-[32px] rounded-full bg-[#8B6F47] hover:bg-[#9B7F57] text-[#F9F7F4] text-[9px] font-sans font-semibold tracking-[0.12em] uppercase transition-all hover:scale-[1.02]"
+              >
+                Launch
+              </button>
+            ) : (
+              <div className="flex flex-col items-center gap-2">
+                <button
+                  onClick={() => setIsPaused(!isPaused)}
+                  className="w-5 h-5 rounded-full bg-white/10 flex items-center justify-center text-white/50 hover:bg-white/20 hover:text-white transition-colors"
+                >
+                  {isPaused ? <ChevronRight size={12} fill="currentColor" /> : <Pause size={10} fill="currentColor" />}
+                </button>
+                <div 
+                  className="relative w-[80px] h-[32px] rounded-full border border-white/20 overflow-hidden"
+                  onMouseDown={startAbort}
+                  onMouseUp={cancelAbort}
+                  onMouseLeave={cancelAbort}
+                >
+                  <div 
+                    className="absolute inset-0 bg-[#EF4444]/40 scale-x-0 origin-left"
+                    style={{ transition: aborting ? 'transform 600ms linear' : 'transform 0s', transform: aborting ? 'scaleX(1)' : 'scaleX(0)' }}
+                  />
+                  <div className="absolute inset-0 flex items-center justify-center text-white/40 text-[9px] font-sans font-medium tracking-[0.12em] uppercase select-none pointer-events-none">
+                    Abort
+                  </div>
+                </div>
+              </div>
+            )}
+          </div>
+
+        </div>
+      </div>
     </>
   );
 }

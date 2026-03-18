@@ -78,6 +78,8 @@ interface AppState {
   toggleTimerOpen: () => void;
   setTimerOpen: (open: boolean) => void;
   setTimerRunning: (running: boolean) => void;
+  rocketPanelCollapsed: boolean;
+  setRocketPanelCollapsed: (collapsed: boolean) => void;
 }
 
 export const useAppStore = create<AppState>((set) => ({
@@ -113,4 +115,7 @@ export const useAppStore = create<AppState>((set) => ({
   toggleTimerOpen: () => set((s) => ({ timerOpen: !s.timerOpen })),
   setTimerOpen: (open) => set({ timerOpen: open }),
   setTimerRunning: (running) => set({ timerRunning: running }),
+
+  rocketPanelCollapsed: false,
+  setRocketPanelCollapsed: (collapsed) => set({ rocketPanelCollapsed: collapsed }),
 }));
