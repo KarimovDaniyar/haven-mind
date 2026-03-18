@@ -15,7 +15,7 @@ export default function FocusTimer() {
   const [sessionsToday, setSessionsToday] = useState(0);
   const [minutesToday, setMinutesToday] = useState(0);
 
-  const intervalRef = useRef<NodeJS.Timeout | null>(null);
+  const intervalRef = useRef<ReturnType<typeof setInterval> | null>(null);
   const audioCtxRef = useRef<AudioContext | null>(null);
   const noiseNodeRef = useRef<AudioBufferSourceNode | null>(null);
   const gainNodeRef = useRef<GainNode | null>(null);
