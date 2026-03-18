@@ -2,6 +2,7 @@ import React, { useState } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
 import { FileText, Hexagon, BarChart3, Settings } from 'lucide-react';
 import { useAppStore, ViewType } from '../store/appStore';
+import GrowthOrganism from './GrowthOrganism';
 
 const navItems: { id: ViewType; icon: React.ElementType; label: string }[] = [
   { id: 'notes', icon: FileText, label: 'Notes' },
@@ -9,19 +10,17 @@ const navItems: { id: ViewType; icon: React.ElementType; label: string }[] = [
   { id: 'tracker', icon: BarChart3, label: 'Tracker' },
 ];
 
-interface SidebarProps {
-  onTimerClick: () => void;
-  timerRunning: boolean;
-}
-
-export default function AppSidebar({ onTimerClick, timerRunning }: SidebarProps) {
-  const { activeView, setActiveView } = useAppStore();
+export default function AppSidebar() {
+  const { activeView, setActiveView, toggleTimerOpen, timerRunning } = useAppStore();
   const [hoveredItem, setHoveredItem] = useState<string | null>(null);
 
   return (
     <div className="w-sidebar h-screen flex flex-col items-center py-4 bg-surface border-r border-border flex-shrink-0 relative z-20">
+      {/* Growth organism behind icons */}
+      <GrowthOrganism />
+
       {/* Top nav icons */}
-      <div className="flex flex-col items-center gap-1 flex-1">
+      <div className="flex flex-col items-center gap-1 flex-1 relative z-10">
         {navItems.map((item) => {
           const isActive = activeView === item.id;
           const Icon = item.icon;
@@ -58,10 +57,10 @@ export default function AppSidebar({ onTimerClick, timerRunning }: SidebarProps)
       </div>
 
       {/* Timer button */}
-      <div className="flex flex-col items-center gap-1 mb-1">
+      <div className="flex flex-col items-center gap-1 mb-1 relative z-10">
         <div className="relative">
           <button
-            onClick={onTimerClick}
+            onClick={toggleTimerOpen}
             onMouseEnter={() => setHoveredItem('timer')}
             onMouseLeave={() => setHoveredItem(null)}
             className="w-9 h-9 flex items-center justify-center rounded-lg text-muted-foreground hover:bg-surface-hover hover:text-foreground transition-spring-micro"
@@ -86,8 +85,8 @@ export default function AppSidebar({ onTimerClick, timerRunning }: SidebarProps)
         </div>
       </div>
 
-      {/* Settings (pinned bottom) */}
-      <div className="relative">
+      {/* Settings */}
+      <div className="relative z-10">
         <button
           onClick={() => setActiveView('settings')}
           onMouseEnter={() => setHoveredItem('settings')}

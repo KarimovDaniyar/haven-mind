@@ -6,13 +6,13 @@ export interface Note {
   id: string;
   title: string;
   type: NoteType;
-  content: string; // markdown for text notes
+  content: string;
   createdAt: number;
   updatedAt: number;
-  // Canvas-specific
   canvasCards?: CanvasCard[];
   canvasArrows?: CanvasArrow[];
   canvasGroups?: CanvasGroup[];
+  inkStrokes?: InkStroke[];
 }
 
 export interface CanvasCard {
@@ -20,7 +20,7 @@ export interface CanvasCard {
   x: number;
   y: number;
   content: string;
-  linkedNoteId?: string; // if embedded from note list
+  linkedNoteId?: string;
   width?: number;
 }
 
@@ -42,8 +42,14 @@ export interface CanvasGroup {
   label: string;
 }
 
+export interface InkStroke {
+  id: string;
+  points: { x: number; y: number }[];
+  color: string;
+}
+
 export interface TimerSession {
-  date: string; // YYYY-MM-DD
+  date: string;
   minutes: number;
   completedAt: number;
 }
@@ -51,11 +57,9 @@ export interface TimerSession {
 export type ViewType = 'notes' | 'graph' | 'tracker' | 'settings';
 
 interface AppState {
-  // Navigation
   activeView: ViewType;
   setActiveView: (view: ViewType) => void;
 
-  // Notes
   notes: Note[];
   activeNoteId: string | null;
   setActiveNoteId: (id: string | null) => void;
@@ -63,12 +67,17 @@ interface AppState {
   updateNote: (id: string, updates: Partial<Note>) => void;
   deleteNote: (id: string) => void;
 
-  // Timer
   timerSessions: TimerSession[];
   addTimerSession: (session: TimerSession) => void;
 
-  // Tracker data (fake focus data for heatmap)
-  focusData: Record<string, number>; // date -> minutes
+  focusData: Record<string, number>;
+
+  // Timer UI state (shared between sidebar and timer widget)
+  timerOpen: boolean;
+  timerRunning: boolean;
+  toggleTimerOpen: () => void;
+  setTimerOpen: (open: boolean) => void;
+  setTimerRunning: (running: boolean) => void;
 }
 
 export const useAppStore = create<AppState>((set) => ({
@@ -98,4 +107,10 @@ export const useAppStore = create<AppState>((set) => ({
   })),
 
   focusData: {},
+
+  timerOpen: false,
+  timerRunning: false,
+  toggleTimerOpen: () => set((s) => ({ timerOpen: !s.timerOpen })),
+  setTimerOpen: (open) => set({ timerOpen: open }),
+  setTimerRunning: (running) => set({ timerRunning: running }),
 }));
