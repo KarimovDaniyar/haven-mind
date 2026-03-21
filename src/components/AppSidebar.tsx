@@ -10,7 +10,7 @@ const navItems: { id: ViewType; icon: React.ElementType; label: string }[] = [
 ];
 
 export default function AppSidebar() {
-  const { activeView, setActiveView } = useAppStore();
+  const { activeView, setActiveView, notesSidebarCollapsed, setNotesSidebarCollapsed } = useAppStore();
   const [hoveredItem, setHoveredItem] = useState<string | null>(null);
   const [isDark, setIsDark] = useState(false);
 
@@ -39,17 +39,41 @@ export default function AppSidebar() {
         {navItems.map((item) => {
           const isActive = activeView === item.id;
           const Icon = item.icon;
+          const notesCollapsedToggle = item.id === 'notes' && activeView === 'notes' && notesSidebarCollapsed;
           return (
             <div key={item.id} className="relative">
               <button
-                onClick={() => setActiveView(item.id)}
+                type="button"
+                onClick={() => {
+                  if (item.id === 'notes') {
+                    if (activeView !== 'notes') {
+                      setActiveView('notes');
+                      setNotesSidebarCollapsed(false);
+                    } else {
+                      setNotesSidebarCollapsed(!notesSidebarCollapsed);
+                    }
+                  } else {
+                    setActiveView(item.id);
+                  }
+                }}
                 onMouseEnter={() => setHoveredItem(item.id)}
                 onMouseLeave={() => setHoveredItem(null)}
                 className={`w-9 h-9 flex items-center justify-center rounded-lg transition-colors duration-200 ${
-                  isActive
+                  isActive && !(item.id === 'notes' && notesCollapsedToggle)
                     ? 'bg-surface-active text-foreground'
-                    : 'text-muted-foreground hover:bg-surface-hover hover:text-foreground'
+                    : notesCollapsedToggle
+                      ? 'text-foreground bg-surface-hover ring-1 ring-border'
+                      : 'text-muted-foreground hover:bg-surface-hover hover:text-foreground'
                 }`}
+                title={
+                  item.id === 'notes'
+                    ? activeView !== 'notes'
+                      ? 'Notes'
+                      : notesSidebarCollapsed
+                        ? 'Show notes panel'
+                        : 'Hide notes panel'
+                    : undefined
+                }
               >
                 <Icon size={18} strokeWidth={1.5} />
               </button>
@@ -62,7 +86,11 @@ export default function AppSidebar() {
                     transition={{ type: 'spring', stiffness: 500, damping: 30, mass: 0.5 }}
                     className="absolute left-12 top-1/2 -translate-y-1/2 bg-popover text-popover-foreground text-xs px-2.5 py-1 rounded-full whitespace-nowrap z-50 pointer-events-none"
                   >
-                    {item.label}
+                    {item.id === 'notes' && activeView === 'notes'
+                      ? notesSidebarCollapsed
+                        ? 'Show notes'
+                        : 'Hide notes'
+                      : item.label}
                   </motion.div>
                 )}
               </AnimatePresence>

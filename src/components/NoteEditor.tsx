@@ -203,17 +203,10 @@ export default function NoteEditor() {
     }
   };
 
-  if (!note) {
-    return (
-      <div className="flex-1 flex items-center justify-center">
-        <p className="text-muted-foreground text-sm">Select a note to begin</p>
-      </div>
-    );
-  }
-
-  if (note.type === 'canvas') return null;
+  if (!note) return null;
 
   return (
+    <div className="h-full min-h-0 flex flex-col w-full">
     <AnimatePresence mode="wait">
       <motion.div
         key={note.id}
@@ -221,9 +214,9 @@ export default function NoteEditor() {
         animate={{ opacity: 1 }}
         exit={{ opacity: 0 }}
         transition={{ type: 'spring', stiffness: 300, damping: 30 }}
-        className="flex-1 overflow-y-auto"
+        className="flex-1 min-h-0 overflow-y-auto flex flex-col"
       >
-        <div ref={editorContainerRef} className="w-full px-6 py-6 relative group">
+        <div ref={editorContainerRef} className="w-full min-h-0 flex-1 px-4 py-4 sm:px-5 sm:py-5 relative group">
           {/* Read/Edit Toggle */}
           <button
             onClick={() => {
@@ -271,7 +264,7 @@ export default function NoteEditor() {
                 onKeyDown={handleContentKeyDown}
                 className="w-full text-[15px] leading-[1.7] text-foreground bg-transparent outline-none resize-none font-sans overflow-hidden"
                 placeholder="Start writing... (type / for commands)"
-                style={{ minHeight: '60vh' }}
+                style={{ minHeight: 'min(60vh, 400px)' }}
               />
 
               {/* Slash command menu */}
@@ -328,5 +321,6 @@ export default function NoteEditor() {
         </div>
       </motion.div>
     </AnimatePresence>
+    </div>
   );
 }

@@ -485,7 +485,7 @@ export default function FocusTimer() {
             {!running ? (
               <button
                 onClick={launch}
-                className="w-[80px] h-[32px] rounded-full bg-[#8B6F47] hover:bg-[#9B7F57] text-[#F9F7F4] text-[9px] font-sans font-semibold tracking-[0.12em] uppercase transition-all hover:scale-[1.02]"
+                className="w-[80px] h-[32px] rounded-full bg-[#8B6F47] hover:bg-[#9B7F57] active:bg-[#9B7F57] text-[#F9F7F4] text-[9px] font-sans font-semibold tracking-[0.12em] uppercase transition-colors hover:scale-[1.02] active:scale-[1.02]"
               >
                 Launch
               </button>

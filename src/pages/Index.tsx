@@ -10,24 +10,53 @@ import GraphView from '../components/GraphView';
 import TrackerView from '../components/TrackerView';
 import SettingsView from '../components/SettingsView';
 import FocusTimer from '../components/FocusTimer';
+import QuickCapture from '../components/QuickCapture';
 
 export default function Index() {
-  const { activeView, notes, activeNoteId, rocketPanelCollapsed, timerRunning } = useAppStore();
+  const { activeView, rocketPanelCollapsed, notesSidebarCollapsed, notes, activeNoteId } = useAppStore();
+  const editorColumnOpen =
+    Boolean(activeNoteId && notes.some((n) => n.id === activeNoteId && n.type === 'text'));
 
   useEffect(() => {
     const store = useAppStore.getState();
+    const ensureWorkspace = () => {
+      if (store.workspaceNoteId) return;
+      const existing =
+        store.notes.find((n) => n.id === 'note-5') ||
+        store.notes.find((n) => n.type === 'canvas');
+      if (existing) {
+        store.setWorkspaceNoteId(existing.id);
+        return;
+      }
+      const id = `workspace-${Date.now()}`;
+      store.addNote({
+        id,
+        title: 'Workspace',
+        type: 'canvas',
+        content: '',
+        createdAt: Date.now(),
+        updatedAt: Date.now(),
+        canvasCards: [],
+        canvasArrows: [],
+        canvasGroups: [],
+        canvasShapes: [],
+        canvasFreeTexts: [],
+        magnetGroups: [],
+      });
+      store.setWorkspaceNoteId(id);
+    };
     if (store.notes.length === 0) {
       sampleNotes.forEach((n) => store.addNote(n));
       store.setActiveNoteId('note-1');
+      ensureWorkspace();
       const focusData = generateFocusData();
       Object.keys(focusData).forEach((date) => {
         store.addTimerSession({ date, minutes: focusData[date], completedAt: Date.now() });
       });
+    } else {
+      ensureWorkspace();
     }
   }, []);
-
-  const activeNote = notes.find((n) => n.id === activeNoteId);
-  const isCanvasNote = activeNote?.type === 'canvas';
 
   const viewTransition = { type: 'spring' as const, stiffness: 300, damping: 30 };
 
@@ -44,9 +73,18 @@ export default function Index() {
       >
         <AnimatePresence mode="wait">
           {activeView === 'notes' && (
-            <motion.div key="notes" initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }} transition={viewTransition} className="flex flex-1 h-full">
-              <NoteList />
-              {isCanvasNote ? <CanvasView /> : <NoteEditor />}
+            <motion.div key="notes" initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }} transition={viewTransition} className="flex flex-1 h-full min-h-0 min-w-0">
+              {!notesSidebarCollapsed && (
+                <>
+                  <NoteList />
+                  {editorColumnOpen && (
+                  <div className="w-[min(420px,40vw)] max-w-[420px] shrink-0 min-w-0 border-r border-border h-full min-h-0 overflow-hidden flex flex-col">
+                    <NoteEditor />
+                  </div>
+                  )}
+                </>
+              )}
+              <CanvasView />
             </motion.div>
           )}
           {activeView === 'graph' && (
@@ -66,15 +104,10 @@ export default function Index() {
           )}
         </AnimatePresence>
 
-        {/* Global Flight Overlay */}
-        <div
-          className={`absolute inset-0 bg-[#0D0D12]/[0.12] pointer-events-none transition-opacity duration-500 z-40 ${
-            timerRunning ? 'opacity-100' : 'opacity-0'
-          }`}
-        />
       </div>
 
       <FocusTimer />
+      <QuickCapture />
     </div>
   );
 }
