@@ -33,7 +33,7 @@ export default function GrowthOrganism() {
 
   const stats = useMemo(() => {
     const totalNotes = notes.length;
-    const totalCanvases = notes.filter((n) => n.type === 'canvas').length;
+    const totalCanvases = 1;
     const totalWords = notes.reduce((sum, n) => sum + countWords(n.content), 0);
     const totalLinks = notes.reduce((sum, n) => sum + extractWikiLinks(n.content), 0);
     const totalArrows = notes.reduce((sum, n) => sum + (n.canvasArrows?.length || 0), 0);

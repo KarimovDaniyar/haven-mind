@@ -9,14 +9,14 @@
     --foreground: 20 12% 10%;         /* #1C1917 */
 
     --surface: 30 18% 94%;            /* #F4F1ED */
-    --surface-hover: 33 20% 91%;      /* #EDE9E3 */
+    --surface-hover: 30 22% 86%;      /* stronger vs surface — readable text on hover (light theme) */
     --surface-active: 33 18% 93%;     /* #F0EBE3 */
 
     --card: 0 0% 100%;                /* white-ish for canvas cards */
     --card-foreground: 20 12% 10%;
 
     --popover: 20 12% 10%;            /* dark floating UI */
-    --popover-foreground: 28 25 23;
+    --popover-foreground: 36 33% 97%; /* light text on dark popover (fixes sidebar tooltips in light theme) */
 
     --primary: 20 12% 10%;            /* #1C1917 */
     --primary-foreground: 36 33% 97%;

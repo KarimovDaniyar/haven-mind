@@ -1,6 +1,6 @@
 import React, { useState, useMemo } from 'react';
-import { motion, AnimatePresence } from 'framer-motion';
-import { Search, Plus, FileText, LayoutGrid, Trash2, Edit2 } from 'lucide-react';
+import { motion } from 'framer-motion';
+import { Search, FileText, Trash2, Edit2 } from 'lucide-react';
 import { useAppStore, Note } from '../store/appStore';
 import {
   ContextMenu,
@@ -16,23 +16,30 @@ export default function NoteList() {
   const [renamingId, setRenamingId] = useState<string | null>(null);
   const [tempTitle, setTempTitle] = useState('');
 
+  const textNotes = useMemo(
+    () =>
+      notes
+        .filter((n) => n.type === 'text')
+        .sort((a, b) => b.createdAt - a.createdAt),
+    [notes]
+  );
+
   const filteredNotes = useMemo(() => {
-    if (!searchQuery.trim()) return notes;
+    if (!searchQuery.trim()) return textNotes;
     const q = searchQuery.toLowerCase();
-    return notes.filter(
+    return textNotes.filter(
       (n) => n.title.toLowerCase().includes(q) || n.content.toLowerCase().includes(q)
     );
-  }, [notes, searchQuery]);
+  }, [textNotes, searchQuery]);
 
-  const createNote = (type: 'text' | 'canvas') => {
+  const createNote = () => {
     const note: Note = {
       id: `note-${Date.now()}`,
       title: '',
-      type,
+      type: 'text',
       content: '',
       createdAt: Date.now(),
       updatedAt: Date.now(),
-      ...(type === 'canvas' ? { canvasCards: [], canvasArrows: [], canvasGroups: [] } : {}),
     };
     addNote(note);
     setActiveNoteId(note.id);
@@ -47,7 +54,6 @@ export default function NoteList() {
   };
 
   const getPreview = (note: Note) => {
-    if (note.type === 'canvas') return `${note.canvasCards?.length || 0} cards`;
     const lines = note.content.split('\n').filter((l) => l.trim() && !l.startsWith('#'));
     return lines[0]?.replace(/[*_\[\]#>`]/g, '').trim().slice(0, 60) || 'Empty note';
   };
@@ -83,6 +89,7 @@ export default function NoteList() {
         )}
         <div className="flex items-center gap-0.5 ml-2 flex-shrink-0">
           <button
+            type="button"
             onClick={() => setSearchOpen(!searchOpen)}
             className="w-7 h-7 flex items-center justify-center rounded-md text-muted-foreground hover:text-foreground hover:bg-surface-hover transition-colors duration-200"
           >
@@ -90,19 +97,12 @@ export default function NoteList() {
           </button>
           
           <button
-            onClick={() => createNote('text')}
+            type="button"
+            onClick={() => createNote()}
             className="w-7 h-7 flex items-center justify-center rounded-md text-muted-foreground hover:text-foreground hover:bg-surface-hover transition-colors duration-200"
             title="New text note"
           >
             <FileText size={14} />
-          </button>
-          
-          <button
-            onClick={() => createNote('canvas')}
-            className="w-7 h-7 flex items-center justify-center rounded-md text-muted-foreground hover:text-foreground hover:bg-surface-hover transition-colors duration-200"
-            title="New canvas"
-          >
-            <LayoutGrid size={14} />
           </button>
         </div>
       </div>
@@ -122,11 +122,53 @@ export default function NoteList() {
                     e.dataTransfer.setData('text/plain', note.id);
                     e.dataTransfer.setData('noteId', note.id);
                     e.dataTransfer.effectAllowed = 'copy';
+                    const row = e.currentTarget as HTMLElement;
+                    const ghost = document.createElement('div');
+                    const ghostMaxH = Math.min(480, Math.round(window.innerHeight * 0.45));
+                    ghost.style.cssText = [
+                      'position:fixed',
+                      'left:-10000px',
+                      'top:0',
+                      'width:288px',
+                      `max-height:${ghostMaxH}px`,
+                      'overflow:auto',
+                      'padding:12px 14px',
+                      'border-radius:10px',
+                      'box-shadow:0 12px 40px rgba(0,0,0,0.2)',
+                      'z-index:2147483647',
+                      'font-family:ui-sans-serif,system-ui,sans-serif',
+                      'background:hsl(var(--card))',
+                      'color:hsl(var(--card-foreground))',
+                      'border:1px solid hsl(var(--border))',
+                    ].join(';');
+                    const titleRow = document.createElement('div');
+                    titleRow.style.cssText = 'font-weight:600;font-size:13px;margin-bottom:8px;line-height:1.3';
+                    titleRow.textContent = note.title || 'Untitled';
+                    ghost.appendChild(titleRow);
+                    if (note.content) {
+                      const bodyRow = document.createElement('div');
+                      bodyRow.style.cssText =
+                        'font-size:11px;line-height:1.55;white-space:pre-wrap;word-break:break-word;opacity:0.92';
+                      bodyRow.textContent = note.content;
+                      ghost.appendChild(bodyRow);
+                    }
+                    document.body.appendChild(ghost);
+                    e.dataTransfer.setDragImage(ghost, 20, 20);
+                    const end = () => {
+                      ghost.remove();
+                      row.removeEventListener('dragend', end);
+                    };
+                    row.addEventListener('dragend', end, { once: true });
                   }}
                   className="group relative"
                 >
                   <button
-                    onClick={() => { if (!isRenaming) setActiveNoteId(note.id); }}
+                    type="button"
+                    onClick={() => {
+                      if (isRenaming) return;
+                      if (activeNoteId === note.id) setActiveNoteId(null);
+                      else setActiveNoteId(note.id);
+                    }}
                     className={`w-full text-left px-3 py-2.5 rounded-md mb-0.5 transition-colors duration-200 ${
                       isActive
                         ? 'bg-surface-active border-l-2 border-l-accent'
@@ -134,10 +176,6 @@ export default function NoteList() {
                     }`}
                   >
                     <div className="flex items-center gap-1.5 pr-6">
-                      {note.type === 'canvas' && (
-                        <LayoutGrid size={11} className="text-muted-foreground flex-shrink-0" />
-                      )}
-                      
                       {isRenaming ? (
                         <input
                           autoFocus
@@ -157,8 +195,8 @@ export default function NoteList() {
                         </span>
                       )}
                     </div>
-                    <p className="text-xs text-muted-foreground truncate mt-0.5">{getPreview(note)}</p>
-                    <p className="text-[11px] text-muted-foreground mt-0.5">{formatDate(note.updatedAt)}</p>
+                    <p className={`text-xs truncate mt-0.5 ${isActive ? 'text-muted-foreground' : 'text-muted-foreground group-hover:text-foreground/90'}`}>{getPreview(note)}</p>
+                    <p className={`text-[11px] mt-0.5 ${isActive ? 'text-muted-foreground' : 'text-muted-foreground group-hover:text-foreground/80'}`}>{formatDate(note.updatedAt)}</p>
                   </button>
                 </div>
               </ContextMenuTrigger>
