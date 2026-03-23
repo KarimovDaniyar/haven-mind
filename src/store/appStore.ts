@@ -15,7 +15,6 @@ export interface Note {
   canvasShapes?: CanvasShape[];
   canvasFreeTexts?: CanvasFreeText[];
   inkStrokes?: InkStroke[];
-  magnetGroups?: MagnetGroup[];
 }
 
 export interface CanvasCard {
@@ -81,10 +80,7 @@ export interface CanvasGroup {
   borderStyle?: 'solid' | 'dashed' | 'none';
 }
 
-export interface MagnetGroup {
-  id: string;
-  cardIds: string[];
-}
+
 
 export interface InkStroke {
   id: string;
@@ -98,13 +94,12 @@ export interface TimerSession {
   completedAt: number;
 }
 
-export type ViewType = 'notes' | 'graph' | 'tracker' | 'settings';
+export type ViewType = 'notes';
 
 export interface ShortcutsConfig {
   newNote: string;
   quickCapture: string;
   search: string;
-  toggleDarkMode: string;
   fitCanvas: string;
   selectTool: string;
   panTool: string;
@@ -119,7 +114,6 @@ const DEFAULT_SHORTCUTS: ShortcutsConfig = {
   newNote: 'Ctrl+N',
   quickCapture: 'Ctrl+Space',
   search: 'Ctrl+F',
-  toggleDarkMode: 'Ctrl+Shift+D',
   fitCanvas: 'F',
   selectTool: 'V',
   panTool: 'H',

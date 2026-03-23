@@ -1,7 +1,7 @@
 import React, { useState, useRef, useCallback, useEffect, useLayoutEffect, useMemo } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
 import { Hand, MousePointer2, Plus, Square, Pencil, Maximize2, ZoomIn, ZoomOut, Circle, Type, Triangle } from 'lucide-react';
-import { useAppStore, CanvasCard, CanvasArrow, CanvasGroup, InkStroke, MagnetGroup, CanvasShape, CanvasFreeText, CanvasShapeType } from '../store/appStore';
+import { useAppStore, CanvasCard, CanvasArrow, CanvasGroup, InkStroke, CanvasShape, CanvasFreeText, CanvasShapeType } from '../store/appStore';
 import { renderMarkdown } from '../utils/markdown';
 import { shapeEdgePoint, shapeBounds, pointInShapePad, defaultShapeBorderColor } from '../utils/canvasAnnotations';
 
@@ -66,53 +66,7 @@ function hexToRgba(hex: string, alpha: number): string {
   return `rgba(${r},${g},${b},${alpha})`;
 }
 
-/** Union all magnet groups that share any card with the snap (avoids broken merge when filter() shifts indices). */
-function mergeMagnetGroupsAfterSnap(
-  current: MagnetGroup[],
-  snapTargetId: string,
-  draggedIds: string[]
-): MagnetGroup[] {
-  const bag = new Set<string>([snapTargetId, ...draggedIds]);
-  let growing = true;
-  while (growing) {
-    growing = false;
-    for (const mg of current) {
-      if (mg.cardIds.some((id) => bag.has(id))) {
-        for (const id of mg.cardIds) {
-          if (!bag.has(id)) {
-            bag.add(id);
-            growing = true;
-          }
-        }
-      }
-    }
-  }
-  const remaining = current.filter((mg) => !mg.cardIds.some((id) => bag.has(id)));
-  if (bag.size > 1) {
-    remaining.push({ id: `mg-${Date.now()}`, cardIds: [...bag] });
-  }
-  return remaining;
-}
 
-/** Any card magnet-linked to a seed id (so moving a frame does not split groups). */
-function expandCardIdsWithMagnetNeighbors(seedIds: Set<string>, magnetGroups: MagnetGroup[]): Set<string> {
-  const bag = new Set(seedIds);
-  let growing = true;
-  while (growing) {
-    growing = false;
-    for (const mg of magnetGroups) {
-      if (mg.cardIds.some((id) => bag.has(id))) {
-        for (const id of mg.cardIds) {
-          if (!bag.has(id)) {
-            bag.add(id);
-            growing = true;
-          }
-        }
-      }
-    }
-  }
-  return bag;
-}
 
 type CanvasTool = 'select' | 'pan' | 'card' | 'frame' | 'shape' | 'text' | 'ink';
 
@@ -227,7 +181,7 @@ export default function CanvasView() {
   const [inkUndoStack, setInkUndoStack] = useState<InkStroke[]>([]);
 
   // Card stacking / magnet groups
-  const [snapTarget, setSnapTarget] = useState<string | null>(null);
+
 
   // Card template picker
   const [cardTemplateOpen, setCardTemplateOpen] = useState<string | null>(null); // cardId
@@ -278,7 +232,7 @@ export default function CanvasView() {
   const shapes = note?.canvasShapes || [];
   const freeTexts = note?.canvasFreeTexts || [];
   const inkStrokes = note?.inkStrokes || [];
-  const magnetGroups = note?.magnetGroups || [];
+
 
   const getEffectiveCardContent = (card: CanvasCard) => {
     if (!card.linkedNoteId) return card.content || '';
@@ -440,9 +394,7 @@ export default function CanvasView() {
     if (note) updateNote(note.id, { inkStrokes: newStrokes });
   }, [note, updateNote]);
 
-  const updateMagnetGroups = useCallback((newGroups: MagnetGroup[]) => {
-    if (note) updateNote(note.id, { magnetGroups: newGroups });
-  }, [note, updateNote]);
+
 
   const updateShapes = useCallback((next: CanvasShape[]) => {
     if (note) updateNote(note.id, { canvasShapes: next });
@@ -451,6 +403,38 @@ export default function CanvasView() {
   const updateFreeTexts = useCallback((next: CanvasFreeText[]) => {
     if (note) updateNote(note.id, { canvasFreeTexts: next });
   }, [note, updateNote]);
+
+  const bringCardToFront = useCallback((id: string) => {
+    if (!note) return;
+    const list = note.canvasCards || [];
+    const item = list.find((c) => c.id === id);
+    if (!item) return;
+    updateCards([...list.filter((c) => c.id !== id), item]);
+  }, [note, updateCards]);
+
+  const bringGroupToFront = useCallback((id: string) => {
+    if (!note) return;
+    const list = note.canvasGroups || [];
+    const item = list.find((g) => g.id === id);
+    if (!item) return;
+    updateGroups([...list.filter((g) => g.id !== id), item]);
+  }, [note, updateGroups]);
+
+  const bringShapeToFront = useCallback((id: string) => {
+    if (!note) return;
+    const list = note.canvasShapes || [];
+    const item = list.find((s) => s.id === id);
+    if (!item) return;
+    updateShapes([...list.filter((s) => s.id !== id), item]);
+  }, [note, updateShapes]);
+
+  const bringFreeTextToFront = useCallback((id: string) => {
+    if (!note) return;
+    const list = note.canvasFreeTexts || [];
+    const item = list.find((t) => t.id === id);
+    if (!item) return;
+    updateFreeTexts([...list.filter((t) => t.id !== id), item]);
+  }, [note, updateFreeTexts]);
 
   const commitShapeWithType = useCallback((x: number, y: number, w: number, h: number, shapeType: CanvasShapeType) => {
     const id = `sh-${Date.now()}`;
@@ -800,30 +784,6 @@ export default function CanvasView() {
       });
       updateCards(newCards);
 
-      // Snap target detection: find closest non-dragged card within 30px (canvas units)
-      const SNAP_THRESHOLD = 30;
-      let nearest: string | null = null;
-      let nearestDist = SNAP_THRESHOLD;
-      const primaryId = dragState.primaryCardId || [...draggingIds][0];
-      const dc = newCards.find((c) => c.id === primaryId);
-      if (dc) {
-        const db = getCardBounds(dc);
-        const dw = db.w;
-        const dh = db.h;
-        newCards.filter((c) => !draggingIds.has(c.id)).forEach((tc) => {
-          const tb = getCardBounds(tc);
-          const tw = tb.w;
-          const th = tb.h;
-          // min edge-to-edge distance between dc and tc
-          const overlapX = Math.min(dc.x + dw, tc.x + tw) - Math.max(dc.x, tc.x);
-          const overlapY = Math.min(dc.y + dh, tc.y + th) - Math.max(dc.y, tc.y);
-          const gapX = overlapX > 0 ? 0 : Math.max(dc.x, tc.x) - Math.min(dc.x + dw, tc.x + tw);
-          const gapY = overlapY > 0 ? 0 : Math.max(dc.y, tc.y) - Math.min(dc.y + dh, tc.y + th);
-          const dist = Math.sqrt(gapX * gapX + gapY * gapY);
-          if (dist < nearestDist) { nearestDist = dist; nearest = tc.id; }
-        });
-      }
-      setSnapTarget(nearest);
       return;
     }
 
@@ -848,7 +808,7 @@ export default function CanvasView() {
         const frameDy = newY - frame.y;
         const contained = getCardsInFrame(frame);
         const seed = new Set(contained.map((cc) => cc.id));
-        const moveIds = expandCardIdsWithMagnetNeighbors(seed, magnetGroups);
+        const moveIds = seed;
         updateCards(cards.map((c) => {
           if (moveIds.has(c.id)) {
             return { ...c, x: c.x + frameDx, y: c.y + frameDy };
@@ -954,47 +914,7 @@ export default function CanvasView() {
     if (isPanning) { setIsPanning(false); return; }
     if (dragState) {
       const draggingIds = new Set(Object.keys(dragState.offsets));
-      if (snapTarget) {
-        // Snap primary card to nearest edge of target, then offset all others relatively
-        const primaryId = dragState.primaryCardId || [...draggingIds][0];
-        const dc = cards.find((c) => c.id === primaryId);
-        const tc = cards.find((c) => c.id === snapTarget);
-        if (dc && tc) {
-          const db = getCardBounds(dc);
-          const tb = getCardBounds(tc);
-          const dw = db.w;
-          const dh = db.h;
-          const tw = tb.w;
-          const th = tb.h;
-          // Determine which edges are closest
-          const gaps = {
-            right: tc.x - (dc.x + dw),   // dc right → tc left
-            left: dc.x - (tc.x + tw),      // dc left ← tc right
-            bottom: tc.y - (dc.y + dh),    // dc bottom → tc top
-            top: dc.y - (tc.y + th),       // dc top ← tc bottom
-          };
-          const sorted = (Object.entries(gaps) as [string, number][]).sort((a, b) => Math.abs(a[1]) - Math.abs(b[1]));
-          const [closestSide] = sorted[0];
-          let snapX = dc.x, snapY = dc.y;
-          if (closestSide === 'right') { snapX = tc.x - dw; snapY = tc.y; }
-          else if (closestSide === 'left') { snapX = tc.x + tw; snapY = tc.y; }
-          else if (closestSide === 'bottom') { snapY = tc.y - dh; snapX = tc.x; }
-          else { snapY = tc.y + th; snapX = tc.x; }
 
-          const ddx = snapX - dc.x;
-          const ddy = snapY - dc.y;
-          updateCards(cards.map((c) => {
-            if (!draggingIds.has(c.id)) return c;
-            return { ...c, x: c.x + ddx, y: c.y + ddy };
-          }));
-
-          const allDragging = [...draggingIds];
-          updateMagnetGroups(mergeMagnetGroupsAfterSnap(magnetGroups, snapTarget, allDragging));
-        }
-        setSnapTarget(null);
-      } else {
-        setSnapTarget(null);
-      }
       setDragState(null);
       return;
     }
@@ -1116,19 +1036,7 @@ export default function CanvasView() {
   // Card drag start — expands selection to include magnet-group siblings
   const startCardDrag = (cardId: string, cx: number, cy: number) => {
     const base = selectedCards.has(cardId) ? selectedCards : new Set([cardId]);
-    // Expand to include all cards in any magnet group that touches the base set
-    const expanded = new Set(base);
-    let changed = true;
-    while (changed) {
-      changed = false;
-      magnetGroups.forEach((mg) => {
-        if (mg.cardIds.some((id) => expanded.has(id))) {
-          mg.cardIds.forEach((id) => {
-            if (!expanded.has(id)) { expanded.add(id); changed = true; }
-          });
-        }
-      });
-    }
+    const expanded = base;
     setSelectedCards(expanded);
     const offsets: Record<string, { dx: number; dy: number }> = {};
     expanded.forEach((id) => {
@@ -1280,6 +1188,7 @@ export default function CanvasView() {
               onMouseDown={(e) => {
                 if (e.button !== 0) return;
                 e.stopPropagation();
+                bringGroupToFront(group.id);
                 setSelectedFrame(group.id);
                 const { x, y } = screenToCanvas(e.clientX, e.clientY);
                 setDraggingFrame({ frameId: group.id, startX: x, startY: y, origX: group.x, origY: group.y });
@@ -1371,6 +1280,7 @@ export default function CanvasView() {
                 onMouseDown={(e) => {
                   if (e.button !== 0) return;
                   e.stopPropagation();
+                  bringShapeToFront(sh.id);
                   setSelectedShapeId(sh.id);
                   setSelectedCards(new Set());
                   setSelectedFreeTextId(null);
@@ -1552,6 +1462,7 @@ export default function CanvasView() {
                 if (el.closest('[data-free-text-toolbar]') || el.closest('[data-free-text-resize]')) return;
                 if (editingFreeTextId === ft.id) return;
                 e.stopPropagation();
+                bringFreeTextToFront(ft.id);
                 setSelectedFreeTextId(ft.id);
                 setSelectedCards(new Set());
                 setSelectedShapeId(null);
@@ -1805,9 +1716,6 @@ export default function CanvasView() {
             const cardEditDisplayValue =
               isEditMode && effectiveContent === NEW_CARD_PLACEHOLDER ? '' : effectiveContent;
             const isHovered = hoveredCard === card.id;
-            const isSnapTarget = snapTarget === card.id;
-            const cardMagnetGroup = magnetGroups.find((mg) => mg.cardIds.includes(card.id));
-            const isGrouped = !!cardMagnetGroup;
             const isLiveDragging = !!dragState && !!dragState.offsets[card.id];
 
             // All templates (built-in + custom), filtered by cardTemplateFilter
@@ -1853,11 +1761,12 @@ export default function CanvasView() {
                   }}
                   className={`bg-card rounded-lg shadow-sm cursor-move relative transition-shadow duration-150 ${
                     isSelected || isEditMode ? 'border-[1.5px] border-accent' : 'border border-border'
-                  } ${isSnapTarget ? 'shadow-[0_0_0_2px_hsl(var(--accent)),0_0_16px_2px_hsl(var(--accent)/0.35)]' : ''}`}
+                  }`}
                   style={{ width: card.width || DEFAULT_CARD_WIDTH, minWidth: 180, boxSizing: 'border-box', padding: 16 }}
                   onMouseDown={(e) => {
                     if (isEditMode || e.button !== 0) return;
                     e.stopPropagation();
+                    bringCardToFront(card.id);
                     const { x, y } = screenToCanvas(e.clientX, e.clientY);
                     startCardDrag(card.id, x, y);
                   }}
@@ -2046,26 +1955,7 @@ export default function CanvasView() {
                     <div className="absolute top-1 right-1 text-[10px] text-muted-foreground">⛓</div>
                   )}
 
-                  {/* Unlink button for grouped cards */}
-                  {isGrouped && isHovered && !isEditMode && (
-                    <button
-                      type="button"
-                      className="absolute -top-2 -right-2 z-30 w-5 h-5 rounded-full flex items-center justify-center text-[11px] font-medium leading-none cursor-pointer shadow-md border-2 border-accent/70 bg-accent text-accent-foreground transition-colors hover:bg-destructive hover:border-destructive hover:text-destructive-foreground"
-                      title="Unlink from group"
-                      onMouseDown={(e) => {
-                        e.preventDefault();
-                        e.stopPropagation();
-                        if (!note) return;
-                        const mgs = useAppStore.getState().notes.find((x) => x.id === note.id)?.magnetGroups || [];
-                        const newGroups = mgs
-                          .map((mg) => ({ ...mg, cardIds: mg.cardIds.filter((id) => id !== card.id) }))
-                          .filter((mg) => mg.cardIds.length > 1);
-                        useAppStore.getState().updateNote(note.id, { magnetGroups: newGroups });
-                      }}
-                    >
-                      ⊗
-                    </button>
-                  )}
+
 
                   {selectedCards.size === 1 && selectedCards.has(card.id) && !isEditMode && (
                     <div
@@ -2309,7 +2199,7 @@ export default function CanvasView() {
             key={t.id}
             onClick={() => setTool(t.id)}
             className={`w-8 h-8 flex items-center justify-center rounded-lg transition-spring-micro text-sm ${
-              tool === t.id ? 'bg-accent text-accent-foreground' : 'hover:bg-accent/25 dark:hover:bg-accent/20'
+              tool === t.id ? 'bg-accent text-accent-foreground' : 'hover:bg-accent/20'
             }`}
             title={t.label}
           >
@@ -2319,7 +2209,7 @@ export default function CanvasView() {
         <div className="w-px h-5 bg-popover-foreground/20 mx-0.5" />
         <button
           onClick={handleFitView}
-          className="w-8 h-8 flex items-center justify-center rounded-lg hover:bg-accent/25 dark:hover:bg-accent/20 transition-spring-micro"
+          className="w-8 h-8 flex items-center justify-center rounded-lg hover:bg-accent/20 transition-spring-micro"
           title="Fit view (F)"
         >
           <Maximize2 size={17} />
@@ -2328,7 +2218,7 @@ export default function CanvasView() {
         <button
           type="button"
           onClick={() => setZoom((z) => Math.max(0.25, z - 0.1))}
-          className="w-8 h-8 flex items-center justify-center rounded-lg hover:bg-accent/25 dark:hover:bg-accent/20 transition-spring-micro"
+          className="w-8 h-8 flex items-center justify-center rounded-lg hover:bg-accent/20 transition-spring-micro"
           title="Zoom out (Ctrl+-)"
         >
           <ZoomOut size={17} />
@@ -2336,7 +2226,7 @@ export default function CanvasView() {
         <button
           type="button"
           onClick={() => setZoom((z) => Math.min(2, z + 0.1))}
-          className="w-8 h-8 flex items-center justify-center rounded-lg hover:bg-accent/25 dark:hover:bg-accent/20 transition-spring-micro"
+          className="w-8 h-8 flex items-center justify-center rounded-lg hover:bg-accent/20 transition-spring-micro"
           title="Zoom in (Ctrl+=)"
         >
           <ZoomIn size={17} />
@@ -2353,7 +2243,7 @@ export default function CanvasView() {
                 className={`w-8 h-8 rounded-lg flex items-center justify-center transition-spring-micro ${
                   shapeToolType === 'rect'
                     ? 'ring-2 ring-popover-foreground/40 ring-offset-1 ring-offset-popover'
-                    : 'hover:bg-accent/25 dark:hover:bg-accent/20'
+                    : 'hover:bg-accent/20'
                 }`}
               >
                 <span className="block w-3.5 h-2.5 border-2 border-current rounded-[3px]" />
@@ -2365,7 +2255,7 @@ export default function CanvasView() {
                 className={`w-8 h-8 rounded-lg flex items-center justify-center transition-spring-micro ${
                   shapeToolType === 'ellipse'
                     ? 'ring-2 ring-popover-foreground/40 ring-offset-1 ring-offset-popover'
-                    : 'hover:bg-accent/25 dark:hover:bg-accent/20'
+                    : 'hover:bg-accent/20'
                 }`}
               >
                 <Circle size={17} strokeWidth={2.25} />
@@ -2377,7 +2267,7 @@ export default function CanvasView() {
                 className={`w-8 h-8 rounded-lg flex items-center justify-center transition-spring-micro ${
                   shapeToolType === 'triangle'
                     ? 'ring-2 ring-popover-foreground/40 ring-offset-1 ring-offset-popover'
-                    : 'hover:bg-accent/25 dark:hover:bg-accent/20'
+                    : 'hover:bg-accent/20'
                 }`}
               >
                 <Triangle size={17} strokeWidth={2.25} />

@@ -6,9 +6,6 @@ import AppSidebar from '../components/AppSidebar';
 import NoteList from '../components/NoteList';
 import NoteEditor from '../components/NoteEditor';
 import CanvasView from '../components/CanvasView';
-import GraphView from '../components/GraphView';
-import TrackerView from '../components/TrackerView';
-import SettingsView from '../components/SettingsView';
 import FocusTimer from '../components/FocusTimer';
 import QuickCapture from '../components/QuickCapture';
 
@@ -41,7 +38,6 @@ export default function Index() {
         canvasGroups: [],
         canvasShapes: [],
         canvasFreeTexts: [],
-        magnetGroups: [],
       });
       store.setWorkspaceNoteId(id);
     };
@@ -85,21 +81,6 @@ export default function Index() {
                 </>
               )}
               <CanvasView />
-            </motion.div>
-          )}
-          {activeView === 'graph' && (
-            <motion.div key="graph" initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }} transition={viewTransition} className="flex flex-1 h-full">
-              <GraphView />
-            </motion.div>
-          )}
-          {activeView === 'tracker' && (
-            <motion.div key="tracker" initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }} transition={viewTransition} className="flex flex-1 h-full">
-              <TrackerView />
-            </motion.div>
-          )}
-          {activeView === 'settings' && (
-            <motion.div key="settings" initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }} transition={viewTransition} className="flex flex-1 h-full">
-              <SettingsView />
             </motion.div>
           )}
         </AnimatePresence>
