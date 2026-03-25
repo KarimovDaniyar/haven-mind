@@ -1,5 +1,6 @@
 import type { CanvasCard, CanvasFreeText, CanvasGroup, CanvasMermaidDiagram, CanvasShape, InkStroke, Note } from '../store/appStore';
 import { MAIN_PAGE_STACK_LEFT, MAIN_PAGE_STACK_TOP } from '../utils/mainPageCanvasLayout';
+import type { CanvasStickyNote } from '../utils/canvasStickyNotesStorage';
 import { CANVAS_DEFAULT_ER_MERMAID } from './defaultCanvasErMermaid';
 
 /** Approximate vertical space from Mermaid top to place the card below it. */
@@ -46,6 +47,20 @@ export function createDefaultWorkspaceCards(): CanvasCard[] {
       content: '',
       linkedNoteId: 'note-3',
       width: 296,
+    },
+  ];
+}
+
+/** Demo sticky on the canvas (localStorage seed only; not part of Note). */
+export function createDefaultWorkspaceStickyNotes(): CanvasStickyNote[] {
+  return [
+    {
+      id: 'st-seed-welcome',
+      x: MAIN_PAGE_STACK_LEFT + 612,
+      y: MAIN_PAGE_STACK_TOP + 96,
+      text: 'Rough ideas? Right-click the canvas for more stickies — they stay on the desk, not in the sidebar.',
+      color: 'yellow',
+      rotationDeg: -1.8,
     },
   ];
 }

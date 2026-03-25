@@ -2,7 +2,8 @@ import React, { useEffect } from 'react';
 import { AnimatePresence, motion } from 'framer-motion';
 import { useAppStore } from '../store/appStore';
 import { sampleNotes, generateFocusData, createDefaultCanvasMainPages } from '../data/sampleData';
-import { getDefaultWorkspaceCanvasFields } from '../data/defaultWorkspaceCanvas';
+import { getDefaultWorkspaceCanvasFields, createDefaultWorkspaceStickyNotes } from '../data/defaultWorkspaceCanvas';
+import { seedCanvasStickyNotesIfEmpty } from '../utils/canvasStickyNotesStorage';
 import NoteList from '../components/NoteList';
 import NoteEditor from '../components/NoteEditor';
 import CanvasView from '../components/CanvasView';
@@ -39,16 +40,22 @@ export default function Index() {
       });
       store.setWorkspaceNoteId(id);
     };
+    const seedWorkspaceStickies = () => {
+      const wid = useAppStore.getState().workspaceNoteId;
+      if (wid) seedCanvasStickyNotesIfEmpty(wid, createDefaultWorkspaceStickyNotes());
+    };
     if (store.notes.length === 0) {
       sampleNotes.forEach((n) => store.addNote(n));
       store.setActiveNoteId('note-1');
       ensureWorkspace();
+      seedWorkspaceStickies();
       const focusData = generateFocusData();
       Object.keys(focusData).forEach((date) => {
         store.addTimerSession({ date, minutes: focusData[date], completedAt: Date.now() });
       });
     } else {
       ensureWorkspace();
+      seedWorkspaceStickies();
     }
   }, []);
 

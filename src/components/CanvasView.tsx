@@ -14,6 +14,15 @@ import {
   MAIN_PAGE_INITIAL_VIEW_TOP_INSET,
 } from '../utils/mainPageCanvasLayout';
 import { measureMmToPx } from '../utils/mainPageBreaks';
+import {
+  loadCanvasStickyNotes,
+  saveCanvasStickyNotes,
+  STICKY_NOTE_SIZE,
+  STICKY_PASTEL_BG,
+  randomStickyRotationDeg,
+  type CanvasStickyNote,
+  type StickyNoteColor,
+} from '../utils/canvasStickyNotesStorage';
 
 // ── Template data ──────────────────────────────────────────────────────────────
 const BUILT_IN_TEMPLATES = [
@@ -256,6 +265,18 @@ export default function CanvasView() {
   const [editingMainPageId, setEditingMainPageId] = useState<string | null>(null);
   const [mermaidModalOpen, setMermaidModalOpen] = useState(false);
 
+  const [stickies, setStickies] = useState<CanvasStickyNote[]>([]);
+  const [selectedStickyId, setSelectedStickyId] = useState<string | null>(null);
+  const [editingStickyId, setEditingStickyId] = useState<string | null>(null);
+  const [draggingSticky, setDraggingSticky] = useState<{
+    id: string; startX: number; startY: number; ox: number; oy: number;
+  } | null>(null);
+  const [stickyShowingColorsId, setStickyShowingColorsId] = useState<string | null>(null);
+  const [canvasBgContextMenu, setCanvasBgContextMenu] = useState<{
+    clientX: number; clientY: number; canvasX: number; canvasY: number;
+  } | null>(null);
+  const stickyEditRef = useRef<HTMLTextAreaElement | null>(null);
+
   const inkColors = ['hsl(var(--foreground))', '#EF4444', '#F59E0B', '#10B981', '#3B82F6', '#8B5CF6'];
 
   const cards = note?.canvasCards || [];
@@ -364,6 +385,72 @@ export default function CanvasView() {
     apply();
   }, [note?.id]);
 
+  const [stickyHydrated, setStickyHydrated] = useState(false);
+
+  useEffect(() => {
+    if (!note?.id) {
+      setStickies([]);
+      setStickyHydrated(false);
+      setSelectedStickyId(null);
+      setEditingStickyId(null);
+      setStickyShowingColorsId(null);
+      setCanvasBgContextMenu(null);
+      return;
+    }
+    setStickies(loadCanvasStickyNotes(note.id));
+    setStickyHydrated(true);
+    setSelectedStickyId(null);
+    setEditingStickyId(null);
+    setStickyShowingColorsId(null);
+    setCanvasBgContextMenu(null);
+  }, [note?.id]);
+
+  useEffect(() => {
+    if (!note?.id || !stickyHydrated) return;
+    saveCanvasStickyNotes(note.id, stickies);
+  }, [note?.id, stickies, stickyHydrated]);
+
+  useEffect(() => {
+    if (!stickyShowingColorsId) return;
+    const t = window.setTimeout(() => setStickyShowingColorsId(null), 4200);
+    return () => clearTimeout(t);
+  }, [stickyShowingColorsId]);
+
+  useEffect(() => {
+    if (!editingStickyId) return;
+    const id = requestAnimationFrame(() => stickyEditRef.current?.focus());
+    return () => cancelAnimationFrame(id);
+  }, [editingStickyId]);
+
+  const bringStickyToFront = useCallback((id: string) => {
+    setStickies((prev) => {
+      const item = prev.find((s) => s.id === id);
+      if (!item) return prev;
+      return [...prev.filter((s) => s.id !== id), item];
+    });
+  }, []);
+
+  const addStickyAtCanvasPoint = useCallback((cx: number, cy: number) => {
+    const id = `st-${Date.now()}`;
+    const half = STICKY_NOTE_SIZE / 2;
+    const newSticky: CanvasStickyNote = {
+      id,
+      x: cx - half,
+      y: cy - half,
+      text: '',
+      color: 'yellow',
+      rotationDeg: randomStickyRotationDeg(),
+    };
+    setStickies((prev) => [...prev, newSticky]);
+    setSelectedStickyId(id);
+    setStickyShowingColorsId(id);
+    setSelectedCards(new Set());
+    setSelectedArrow(null);
+    setSelectedFrame(null);
+    setSelectedFreeTextId(null);
+    setSelectedMermaidDiagramId(null);
+  }, []);
+
   const updateMainPageContent = useCallback((id: string, content: string) => {
     if (!note) return;
     const list = note.canvasMainPages || [];
@@ -452,18 +539,34 @@ export default function CanvasView() {
 
   // Close context menus on outside click
   useEffect(() => {
-    if (!cardContextMenu && !frameCustomize) return;
+    if (!cardContextMenu && !frameCustomize && !canvasBgContextMenu) return;
     const close = () => {
       setCardContextMenu(null);
       setFrameCustomize(null);
+      setCanvasBgContextMenu(null);
     };
     window.addEventListener('click', close);
     return () => window.removeEventListener('click', close);
-  }, [cardContextMenu, frameCustomize]);
+  }, [cardContextMenu, frameCustomize, canvasBgContextMenu]);
 
   const updateCards = useCallback((newCards: CanvasCard[]) => {
     if (note) updateNote(note.id, { canvasCards: newCards });
   }, [note, updateNote]);
+
+  const addLinkedNoteCardAtCanvasPoint = useCallback((cx: number, cy: number) => {
+    if (!note) return;
+    const newCard: CanvasCard = {
+      id: `cc-${Date.now()}`,
+      x: cx,
+      y: cy,
+      content: NEW_CARD_PLACEHOLDER,
+      width: DEFAULT_CARD_WIDTH,
+    };
+    const list = note.canvasCards || [];
+    updateCards([...list, newCard]);
+    setSelectedCards(new Set([newCard.id]));
+    setSelectedStickyId(null);
+  }, [note, updateCards]);
 
   const updateArrows = useCallback((newArrows: CanvasArrow[]) => {
     if (note) updateNote(note.id, { canvasArrows: newArrows });
@@ -584,7 +687,7 @@ export default function CanvasView() {
       const isInputActive = document.activeElement?.tagName === 'INPUT' || 
                            document.activeElement?.tagName === 'TEXTAREA' || 
                            (document.activeElement as HTMLElement)?.isContentEditable;
-      if (editingCard || editingArrowLabel || editingFreeTextId || editingMainPageId) return;
+      if (editingCard || editingArrowLabel || editingFreeTextId || editingMainPageId || editingStickyId) return;
       if (isInputActive) return;
 
       if (e.key === 'Escape' && (resizingCard || resizingFrame)) {
@@ -621,12 +724,20 @@ export default function CanvasView() {
         updateCards(cards.filter((c) => !selectedCards.has(c.id)));
         setSelectedCards(new Set());
       }
+      if ((e.key === 'Delete' || e.key === 'Backspace') && selectedStickyId) {
+        e.preventDefault();
+        setStickies((prev) => prev.filter((s) => s.id !== selectedStickyId));
+        setSelectedStickyId(null);
+        setStickyShowingColorsId(null);
+      }
       if (e.key === 'Escape') {
         setSelectedCards(new Set());
         setSelectedArrow(null);
         setSelectedFrame(null);
         setSelectedFreeTextId(null);
         setSelectedMermaidDiagramId(null);
+        setSelectedStickyId(null);
+        setStickyShowingColorsId(null);
       }
 
       // Undo for ink
@@ -658,10 +769,12 @@ export default function CanvasView() {
       editingArrowLabel,
       editingFreeTextId,
       editingMainPageId,
+      editingStickyId,
       selectedArrow,
       selectedFrame,
       selectedFreeTextId,
       selectedMermaidDiagramId,
+      selectedStickyId,
       arrows,
       groups,
       freeTexts,
@@ -731,6 +844,7 @@ export default function CanvasView() {
       target.closest('[data-free-text]') ||
       target.closest('[data-free-text-toolbar]') ||
       target.closest('[data-canvas-mermaid]') ||
+      target.closest('[data-sticky-note]') ||
       target.closest('[data-main-page-doc]') ||
       target.closest('[data-main-page-add]') ||
       target.closest('[data-main-page-slash]') ||
@@ -797,7 +911,7 @@ export default function CanvasView() {
     }
 
     if (tool === 'select') {
-      // Double-click creates card
+      // Double-click empty canvas: linked note card (user can link from sidebar)
       if (e.detail === 2) {
         const newCard: CanvasCard = { id: `cc-${Date.now()}`, x, y, content: NEW_CARD_PLACEHOLDER, width: DEFAULT_CARD_WIDTH };
         updateCards([...cards, newCard]);
@@ -811,6 +925,7 @@ export default function CanvasView() {
       setSelectedFrame(null);
       setSelectedFreeTextId(null);
       setSelectedMermaidDiagramId(null);
+      setSelectedStickyId(null);
     }
   };
 
@@ -914,6 +1029,19 @@ export default function CanvasView() {
       return;
     }
 
+    if (draggingSticky) {
+      const dx = x - draggingSticky.startX;
+      const dy = y - draggingSticky.startY;
+      setStickies((prev) =>
+        prev.map((s) =>
+          s.id === draggingSticky.id
+            ? { ...s, x: draggingSticky.ox + dx, y: draggingSticky.oy + dy }
+            : s
+        )
+      );
+      return;
+    }
+
     if (lassoRect) {
       setLassoRect({ ...lassoRect, currentX: x, currentY: y });
       return;
@@ -1000,6 +1128,7 @@ export default function CanvasView() {
     if (draggingFreeText) { setDraggingFreeText(null); return; }
     if (resizingFreeText) { setResizingFreeText(null); return; }
     if (draggingMermaidDiagram) { setDraggingMermaidDiagram(null); return; }
+    if (draggingSticky) { setDraggingSticky(null); return; }
 
     if (lassoRect) {
       const lx = Math.min(lassoRect.startX, lassoRect.currentX);
@@ -1152,6 +1281,7 @@ export default function CanvasView() {
           setDraggingFreeText(null);
           setResizingFreeText(null);
           setDraggingMermaidDiagram(null);
+          setDraggingSticky(null);
         }}
         style={{
           cursor: getCursor(),
@@ -1176,7 +1306,29 @@ export default function CanvasView() {
           </div>
         )}
 
-        <div className="absolute inset-0" style={{ transform: `translate(${offset.x}px, ${offset.y}px) scale(${zoom})`, transformOrigin: '0 0' }}>
+        <div
+          className="absolute inset-0"
+          style={{ transform: `translate(${offset.x}px, ${offset.y}px) scale(${zoom})`, transformOrigin: '0 0' }}
+          onContextMenu={(e) => {
+            const target = e.target as HTMLElement;
+            if (
+              target.closest('[data-card]') ||
+              target.closest('[data-handle]') ||
+              target.closest('[data-free-text]') ||
+              target.closest('[data-canvas-mermaid]') ||
+              target.closest('[data-sticky-note]') ||
+              target.closest('[data-main-page-doc]') ||
+              target.closest('[data-main-page-add]') ||
+              target.closest('[data-frame-label]') ||
+              target.closest('[data-canvas-frame]')
+            ) {
+              return;
+            }
+            e.preventDefault();
+            const { x: cx, y: cy } = screenToCanvas(e.clientX, e.clientY);
+            setCanvasBgContextMenu({ clientX: e.clientX, clientY: e.clientY, canvasX: cx, canvasY: cy });
+          }}
+        >
           {note.canvasMainPages && note.canvasMainPages.length > 0 && (
             <div
               className="pointer-events-none absolute z-[2]"
@@ -1204,6 +1356,7 @@ export default function CanvasView() {
             return (
             <div
               key={group.id}
+              data-canvas-frame
               className={`absolute rounded-lg ${selectedFrame === group.id ? 'border-[1.5px]' : 'border-[1.5px]'}`}
               style={{
                 left: group.x, top: group.y, width: group.width, height: group.height,
@@ -1413,6 +1566,107 @@ export default function CanvasView() {
             </div>
           ))}
 
+          {stickies.map((s) => {
+            const editing = editingStickyId === s.id;
+            const selected = selectedStickyId === s.id;
+            return (
+              <div
+                key={s.id}
+                data-sticky-note
+                className="absolute z-[22] select-none"
+                style={{ left: s.x, top: s.y, width: STICKY_NOTE_SIZE }}
+                onContextMenu={(e) => {
+                  e.preventDefault();
+                  e.stopPropagation();
+                }}
+                onMouseDown={(e) => {
+                  if (e.button !== 0) return;
+                  const el = e.target as HTMLElement;
+                  if (el.closest('[data-sticky-color-btn]')) return;
+                  if (el.tagName === 'TEXTAREA') return;
+                  e.stopPropagation();
+                  bringStickyToFront(s.id);
+                  setSelectedStickyId(s.id);
+                  setSelectedCards(new Set());
+                  setSelectedArrow(null);
+                  setSelectedFrame(null);
+                  setSelectedFreeTextId(null);
+                  setSelectedMermaidDiagramId(null);
+                  if (!editing) {
+                    const { x, y } = screenToCanvas(e.clientX, e.clientY);
+                    setDraggingSticky({ id: s.id, startX: x, startY: y, ox: s.x, oy: s.y });
+                  }
+                }}
+                onDoubleClick={(e) => {
+                  e.stopPropagation();
+                  bringStickyToFront(s.id);
+                  setSelectedStickyId(s.id);
+                  setEditingStickyId(s.id);
+                }}
+              >
+                <div
+                  className={`rounded-[2px] ${selected ? 'ring-2 ring-accent/50 ring-offset-1 ring-offset-transparent' : ''}`}
+                  style={{
+                    width: STICKY_NOTE_SIZE,
+                    height: STICKY_NOTE_SIZE,
+                    transform: `rotate(${s.rotationDeg}deg)`,
+                    transformOrigin: 'center center',
+                    backgroundColor: STICKY_PASTEL_BG[s.color],
+                    boxShadow: '0 12px 28px rgba(0,0,0,0.11), 0 4px 10px rgba(0,0,0,0.06)',
+                  }}
+                >
+                  {editing ? (
+                    <textarea
+                      ref={editing ? stickyEditRef : undefined}
+                      className="h-full w-full resize-none bg-transparent p-2.5 text-[14px] leading-snug text-zinc-800 outline-none placeholder:text-zinc-400/70"
+                      style={{ fontFamily: "'Caveat', 'Segoe Print', 'Bradley Hand', cursive" }}
+                      value={s.text}
+                      placeholder="Jot something…"
+                      onChange={(e) => {
+                        const val = e.target.value;
+                        setStickies((prev) => prev.map((x) => (x.id === s.id ? { ...x, text: val } : x)));
+                      }}
+                      onMouseDown={(e) => e.stopPropagation()}
+                      onBlur={() => setEditingStickyId(null)}
+                      onKeyDown={(e) => {
+                        if (e.key === 'Escape') {
+                          e.preventDefault();
+                          (e.target as HTMLTextAreaElement).blur();
+                        }
+                      }}
+                    />
+                  ) : (
+                    <div
+                      className="h-full w-full cursor-grab overflow-hidden p-2.5 text-[14px] leading-snug text-zinc-800 whitespace-pre-wrap break-words"
+                      style={{ fontFamily: "'Caveat', 'Segoe Print', 'Bradley Hand', cursive" }}
+                    >
+                      {s.text || '\u00a0'}
+                    </div>
+                  )}
+                </div>
+                {stickyShowingColorsId === s.id && (
+                  <div className="mt-2 flex justify-center gap-2 pointer-events-auto">
+                    {(['yellow', 'green', 'pink', 'blue'] as StickyNoteColor[]).map((c) => (
+                      <button
+                        key={c}
+                        type="button"
+                        data-sticky-color-btn
+                        title={c}
+                        className="h-5 w-5 shrink-0 rounded-full border border-zinc-900/10 shadow-sm hover:scale-110 transition-transform"
+                        style={{ backgroundColor: STICKY_PASTEL_BG[c] }}
+                        onMouseDown={(e) => e.preventDefault()}
+                        onClick={() => {
+                          setStickies((prev) => prev.map((x) => (x.id === s.id ? { ...x, color: c } : x)));
+                          setStickyShowingColorsId(null);
+                        }}
+                      />
+                    ))}
+                  </div>
+                )}
+              </div>
+            );
+          })}
+
           {mermaidDiagrams.map((d) => (
             <div
               key={d.id}
@@ -1429,6 +1683,7 @@ export default function CanvasView() {
                 setSelectedCards(new Set());
                 setSelectedFreeTextId(null);
                 setSelectedArrow(null);
+                setSelectedStickyId(null);
                 const { x, y } = screenToCanvas(e.clientX, e.clientY);
                 setDraggingMermaidDiagram({ id: d.id, startX: x, startY: y, ox: d.x, oy: d.y });
               }}
@@ -1620,6 +1875,7 @@ export default function CanvasView() {
                   onMouseDown={(e) => {
                     if (isEditMode || e.button !== 0) return;
                     e.stopPropagation();
+                    setSelectedStickyId(null);
                     bringCardToFront(card.id);
                     const { x, y } = screenToCanvas(e.clientX, e.clientY);
                     startCardDrag(card.id, x, y);
@@ -1875,6 +2131,36 @@ export default function CanvasView() {
           })}
         </div>
       </div>
+
+      {canvasBgContextMenu && (
+        <div
+          className="fixed z-[2100] min-w-[180px] rounded-lg border border-border bg-popover py-1 text-popover-foreground shadow-lg"
+          style={{ left: canvasBgContextMenu.clientX, top: canvasBgContextMenu.clientY }}
+          onMouseDown={(e) => e.stopPropagation()}
+          onClick={(e) => e.stopPropagation()}
+        >
+          <button
+            type="button"
+            className="w-full px-3 py-2 text-left text-sm hover:bg-muted"
+            onClick={() => {
+              if (note) addStickyAtCanvasPoint(canvasBgContextMenu.canvasX, canvasBgContextMenu.canvasY);
+              setCanvasBgContextMenu(null);
+            }}
+          >
+            Add Sticky Note
+          </button>
+          <button
+            type="button"
+            className="w-full px-3 py-2 text-left text-sm hover:bg-muted"
+            onClick={() => {
+              addLinkedNoteCardAtCanvasPoint(canvasBgContextMenu.canvasX, canvasBgContextMenu.canvasY);
+              setCanvasBgContextMenu(null);
+            }}
+          >
+            Linked Note
+          </button>
+        </div>
+      )}
 
       {/* Card context menu */}
       {cardContextMenu && (
