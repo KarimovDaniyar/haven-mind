@@ -1,12 +1,12 @@
-import React, { useLayoutEffect, useState } from 'react';
-import { PanelLeftOpen, PanelLeftClose, MessageSquareText, Printer, Workflow } from 'lucide-react';
+import React from 'react';
+import { PanelLeftOpen, PanelLeftClose, MessageSquareText, Printer, Workflow, Rocket } from 'lucide-react';
 import { useAppStore } from '../store/appStore';
 import { measureMmToPx } from '../utils/mainPageBreaks';
 import { openMainPagePrintDocument } from '../utils/mainPagePrint';
 
 /** Identical row styling to `data-free-text-toolbar` in CanvasView (no position classes). */
 const floatingBarClass =
-  'flex flex-nowrap items-center gap-1.5 bg-popover border border-border rounded-lg px-2 py-1.5 shadow-md z-30 max-w-[min(420px,calc(100vw-48px))] overflow-x-auto';
+  'flex flex-nowrap items-center gap-1.5 bg-popover border border-border rounded-lg px-2 py-1.5 shadow-md z-30 w-max max-w-[calc(100vw-48px)]';
 
 const btnClass =
   'inline-flex items-center gap-1.5 text-[13px] px-2 py-1 rounded-md hover:bg-surface-hover text-foreground';
@@ -25,13 +25,9 @@ export default function CanvasActionToolbar({ hasMainPages, mergedMarkdownForPri
     setNotesSidebarCollapsed,
     toggleNoteAdviser,
     noteAdviserOpen,
+    rocketPanelCollapsed,
+    setRocketPanelCollapsed,
   } = useAppStore();
-
-  const [pageHeightPx, setPageHeightPx] = useState(1123);
-
-  useLayoutEffect(() => {
-    setPageHeightPx(measureMmToPx(297));
-  }, []);
 
   const exportPdf = () => {
     if (!hasMainPages || !mergedMarkdownForPrint.trim()) return;
@@ -39,7 +35,6 @@ export default function CanvasActionToolbar({ hasMainPages, mergedMarkdownForPri
     openMainPagePrintDocument({
       title: 'Main note',
       fullMarkdown: mergedMarkdownForPrint,
-      pageHeightPx,
       contentInnerWidthPx: innerW,
     });
   };
@@ -71,6 +66,15 @@ export default function CanvasActionToolbar({ hasMainPages, mergedMarkdownForPri
       >
         <MessageSquareText className="h-4 w-4 shrink-0" strokeWidth={2} />
         <span>Adviser</span>
+      </button>
+      <button
+        type="button"
+        className={`${btnClass} ${!rocketPanelCollapsed ? btnActiveClass : ''}`}
+        title={rocketPanelCollapsed ? 'Focus timer' : 'Hide focus timer'}
+        onClick={() => setRocketPanelCollapsed(!rocketPanelCollapsed)}
+      >
+        <Rocket className="h-4 w-4 shrink-0" strokeWidth={2} />
+        <span>Focus</span>
       </button>
       <button
         type="button"

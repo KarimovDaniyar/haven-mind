@@ -1,8 +1,22 @@
 /** Hard page break: own line in source markdown. */
 export const MAIN_PAGE_PAGEBREAK_LINE = '/pagebreak';
 
+/** Splits on a line that is only `/pagebreak` (optional surrounding spaces). Matches markdown skip + PDF export. */
 export function splitHardPageSegments(source: string): string[] {
-  return source.split(/\r?\n\/pagebreak\s*\r?\n/);
+  const normalized = source.replace(/\r\n/g, '\n');
+  const lines = normalized.split('\n');
+  const segments: string[] = [];
+  let buf: string[] = [];
+  for (const line of lines) {
+    if (line.trim() === '/pagebreak') {
+      segments.push(buf.join('\n'));
+      buf = [];
+    } else {
+      buf.push(line);
+    }
+  }
+  segments.push(buf.join('\n'));
+  return segments;
 }
 
 /** Spacers before segments 1..n so each segment starts on a new virtual A4 page (screen layout). */

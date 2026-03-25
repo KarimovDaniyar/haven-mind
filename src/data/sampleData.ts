@@ -1,5 +1,5 @@
 import { Note, TimerSession, CanvasMainPage } from '../store/appStore';
-import { createDefaultCanvasMermaidDiagrams } from './defaultCanvasErMermaid';
+import { getDefaultWorkspaceCanvasFields } from './defaultWorkspaceCanvas';
 
 /** Demo markdown for the canvas A4 main note — covers every supported construct. */
 export const DEFAULT_CANVAS_MAIN_PAGE_CONTENT = `# Your desk, one sheet at a time
@@ -188,21 +188,7 @@ At the end of each work day:
     content: '',
     createdAt: now - 6 * day,
     updatedAt: now - 1 * day,
-    canvasCards: [
-      { id: 'cc-1', x: 120, y: 100, content: 'Deep focus\nThe foundation of all creative output. Without sustained attention, ideas remain shallow.' },
-      { id: 'cc-2', x: 460, y: 80, content: 'Environment design\nCurate your workspace to minimize friction and maximize flow triggers.' },
-      { id: 'cc-3', x: 300, y: 300, content: 'Ritual building\nConsistent routines reduce decision fatigue and signal "work mode" to the brain.' },
-      { id: 'cc-4', x: 620, y: 280, content: 'Measurement\nTrack deep work hours, not tasks completed. Output follows input.' },
-      { id: 'cc-5', x: 160, y: 480, content: 'Recovery\nDeliberate rest is not laziness — it\'s fuel for the next deep session.' },
-    ],
-    canvasArrows: [
-      { id: 'ca-1', fromCardId: 'cc-1', toCardId: 'cc-3', fromSide: 'bottom', toSide: 'top' },
-      { id: 'ca-2', fromCardId: 'cc-2', toCardId: 'cc-4', fromSide: 'bottom', toSide: 'top' },
-    ],
-    canvasGroups: [
-      { id: 'cg-1', x: 80, y: 50, width: 580, height: 320, label: 'Core ideas' },
-    ],
-    canvasMermaidDiagrams: createDefaultCanvasMermaidDiagrams(),
+    ...getDefaultWorkspaceCanvasFields(),
     canvasMainPages: createDefaultCanvasMainPages(),
   },
 ];

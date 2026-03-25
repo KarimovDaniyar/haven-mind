@@ -34,6 +34,8 @@ export interface CanvasArrow {
   /** Card id when endpoint is a card (legacy arrows use both). */
   fromCardId?: string;
   toCardId?: string;
+  /** Arrow ends on the A4 main note stack (wiki-style link to the sheet). */
+  toMainPage?: boolean;
   /** Shape id when endpoint is a canvas shape. */
   fromShapeId?: string;
   toShapeId?: string;
@@ -239,7 +241,7 @@ export const useAppStore = create<AppState>((set) => ({
   rocketPanelCollapsed: true,
   setRocketPanelCollapsed: (collapsed) => set({ rocketPanelCollapsed: collapsed }),
 
-  notesSidebarCollapsed: false,
+  notesSidebarCollapsed: true,
   setNotesSidebarCollapsed: (collapsed) => set({ notesSidebarCollapsed: collapsed }),
 
   shortcutsConfig: loadShortcuts(),

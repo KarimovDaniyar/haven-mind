@@ -8,7 +8,12 @@ import CanvasMainPages from './CanvasMainPages';
 import CanvasActionToolbar from './CanvasActionToolbar';
 import MermaidDiagramModal from './MermaidDiagramModal';
 import MermaidCanvasContent from './MermaidCanvasContent';
-import { MAIN_PAGE_STACK_LEFT, MAIN_PAGE_STACK_TOP } from '../utils/mainPageCanvasLayout';
+import {
+  MAIN_PAGE_STACK_LEFT,
+  MAIN_PAGE_STACK_TOP,
+  MAIN_PAGE_INITIAL_VIEW_TOP_INSET,
+} from '../utils/mainPageCanvasLayout';
+import { measureMmToPx } from '../utils/mainPageBreaks';
 
 // ── Template data ──────────────────────────────────────────────────────────────
 const BUILT_IN_TEMPLATES = [
@@ -106,6 +111,31 @@ const FREE_TEXT_COLORS = {
 
 const NEW_CARD_PLACEHOLDER = 'New card\nDouble-click to edit';
 
+/** A4 sheet width in CSS px (matches `CanvasMainPages` frame). */
+const MAIN_PAGE_SHEET_W_PX = 794;
+
+function getMainPageLinkAnchor(
+  side: 'top' | 'right' | 'bottom' | 'left',
+  paperHeightPx: number,
+): { x: number; y: number } {
+  const L = MAIN_PAGE_STACK_LEFT;
+  const T = MAIN_PAGE_STACK_TOP;
+  const W = MAIN_PAGE_SHEET_W_PX;
+  const H = paperHeightPx;
+  switch (side) {
+    case 'left':
+      return { x: L + 4, y: T + H * 0.44 };
+    case 'right':
+      return { x: L + W - 4, y: T + H * 0.44 };
+    case 'top':
+      return { x: L + W * 0.34, y: T + 6 };
+    case 'bottom':
+      return { x: L + W * 0.36, y: T + H - 6 };
+    default:
+      return { x: L + 4, y: T + H * 0.44 };
+  }
+}
+
 /** Scroll area inside card (matches Tailwind max-h below). Shell adds 16px padding top/bottom. */
 const CARD_NOTE_BODY_MAX_PX = 480;
 const CARD_SHELL_VERTICAL_PAD = 32;
@@ -121,7 +151,16 @@ function splitCardTextToNote(fullText: string): { title: string; content: string
 }
 
 export default function CanvasView() {
-  const { notes, workspaceNoteId, updateNote, setActiveNoteId, setActiveView, shortcutsConfig } = useAppStore();
+  const {
+    notes,
+    workspaceNoteId,
+    updateNote,
+    setActiveNoteId,
+    setActiveView,
+    shortcutsConfig,
+    setNotesSidebarCollapsed,
+    setNoteAdviserOpen,
+  } = useAppStore();
   const note = notes.find((n) => n.id === workspaceNoteId);
 
   const [tool, setTool] = useState<CanvasTool>('select');
@@ -129,6 +168,7 @@ export default function CanvasView() {
   const [zoom, setZoom] = useState(1);
   const canvasRef = useRef<HTMLDivElement>(null);
   const containerRef = useRef<HTMLDivElement>(null);
+  const lastCenteredWorkspaceNoteIdRef = useRef<string | null>(null);
 
   // Selection
   const [selectedCards, setSelectedCards] = useState<Set<string>>(new Set());
@@ -301,6 +341,28 @@ export default function CanvasView() {
     if (note.canvasMainPages && note.canvasMainPages.length > 0) return;
     updateNote(note.id, { canvasMainPages: createDefaultCanvasMainPages() });
   }, [note?.id, note?.canvasMainPages, note, updateNote]);
+
+  useLayoutEffect(() => {
+    if (!note?.id) return;
+    if (lastCenteredWorkspaceNoteIdRef.current === note.id) return;
+    const el = canvasRef.current;
+    if (!el) return;
+    const apply = () => {
+      if (lastCenteredWorkspaceNoteIdRef.current === note.id) return;
+      const rect = el.getBoundingClientRect();
+      if (rect.width < 80 || rect.height < 80) {
+        requestAnimationFrame(apply);
+        return;
+      }
+      lastCenteredWorkspaceNoteIdRef.current = note.id;
+      const cx = MAIN_PAGE_STACK_LEFT + MAIN_PAGE_SHEET_W_PX / 2;
+      setOffset({
+        x: rect.width / 2 - cx,
+        y: MAIN_PAGE_INITIAL_VIEW_TOP_INSET - MAIN_PAGE_STACK_TOP,
+      });
+    };
+    apply();
+  }, [note?.id]);
 
   const updateMainPageContent = useCallback((id: string, content: string) => {
     if (!note) return;
@@ -1025,6 +1087,8 @@ export default function CanvasView() {
 
   if (!note) return null;
 
+  const mainPagePaperH = measureMmToPx(297);
+
   const handles: ('top' | 'right' | 'bottom' | 'left')[] = ['top', 'right', 'bottom', 'left'];
 
   return (
@@ -1102,7 +1166,11 @@ export default function CanvasView() {
               <CanvasActionToolbar
                 hasMainPages={Boolean(note.canvasMainPages && note.canvasMainPages.length > 0)}
                 mergedMarkdownForPrint={mergedMainPageMarkdown}
-                onOpenDiagram={() => setMermaidModalOpen(true)}
+                onOpenDiagram={() => {
+                  setNotesSidebarCollapsed(true);
+                  setNoteAdviserOpen(false);
+                  setMermaidModalOpen(true);
+                }}
               />
             </div>
           </div>
@@ -1349,7 +1417,7 @@ export default function CanvasView() {
             <div
               key={d.id}
               data-canvas-mermaid
-              className={`absolute z-[11] w-fit cursor-move rounded-md bg-transparent ${
+              className={`absolute z-[11] w-fit cursor-move bg-transparent ${
                 selectedMermaidDiagramId === d.id ? 'ring-1 ring-accent/70' : ''
               }`}
               style={{ left: d.x, top: d.y }}
@@ -1395,7 +1463,11 @@ export default function CanvasView() {
               let from: { x: number; y: number } | null = null;
               let to: { x: number; y: number } | null = null;
               if (fromCard) from = getCardCenter(fromCard, arrow.fromSide);
-              if (toCard) to = getCardCenter(toCard, arrow.toSide);
+              if (arrow.toMainPage) {
+                to = getMainPageLinkAnchor(arrow.toSide, mainPagePaperH);
+              } else if (toCard) {
+                to = getCardCenter(toCard, arrow.toSide);
+              }
               if (!from || !to) return null;
               const d = getArrowPath(from, to);
               const isSelected = selectedArrow === arrow.id;

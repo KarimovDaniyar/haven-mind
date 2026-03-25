@@ -2,7 +2,7 @@ import React, { useEffect } from 'react';
 import { AnimatePresence, motion } from 'framer-motion';
 import { useAppStore } from '../store/appStore';
 import { sampleNotes, generateFocusData, createDefaultCanvasMainPages } from '../data/sampleData';
-import { createDefaultCanvasMermaidDiagrams } from '../data/defaultCanvasErMermaid';
+import { getDefaultWorkspaceCanvasFields } from '../data/defaultWorkspaceCanvas';
 import NoteList from '../components/NoteList';
 import NoteEditor from '../components/NoteEditor';
 import CanvasView from '../components/CanvasView';
@@ -34,12 +34,7 @@ export default function Index() {
         content: '',
         createdAt: Date.now(),
         updatedAt: Date.now(),
-        canvasCards: [],
-        canvasArrows: [],
-        canvasGroups: [],
-        canvasShapes: [],
-        canvasFreeTexts: [],
-        canvasMermaidDiagrams: createDefaultCanvasMermaidDiagrams(),
+        ...getDefaultWorkspaceCanvasFields(),
         canvasMainPages: createDefaultCanvasMainPages(),
       });
       store.setWorkspaceNoteId(id);
