@@ -14,7 +14,10 @@ export interface Note {
   canvasGroups?: CanvasGroup[];
   canvasShapes?: CanvasShape[];
   canvasFreeTexts?: CanvasFreeText[];
+  /** Rendered Mermaid SVG blocks placed on the infinite canvas (not inside A4 markdown). */
+  canvasMermaidDiagrams?: CanvasMermaidDiagram[];
   inkStrokes?: InkStroke[];
+  canvasMainPages?: CanvasMainPage[];
 }
 
 export interface CanvasCard {
@@ -69,6 +72,17 @@ export interface CanvasFreeText {
   align: 'left' | 'center' | 'right';
 }
 
+export interface CanvasMermaidDiagram {
+  id: string;
+  x: number;
+  y: number;
+  /** @deprecated Ignored; container size follows SVG getBBox(). */
+  width?: number;
+  svg: string;
+  /** When set without `svg`, the client renders via Mermaid and may persist `svg`. */
+  mermaidSource?: string;
+}
+
 export interface CanvasGroup {
   id: string;
   x: number;
@@ -86,6 +100,12 @@ export interface InkStroke {
   id: string;
   points: { x: number; y: number }[];
   color: string;
+}
+
+/** Fixed-width A4 sheets on the workspace canvas (main document, not floating cards). */
+export interface CanvasMainPage {
+  id: string;
+  content: string;
 }
 
 export interface TimerSession {
@@ -169,6 +189,11 @@ interface AppState {
 
   quickCaptureOpen: boolean;
   setQuickCaptureOpen: (open: boolean) => void;
+
+  /** Right sidebar: mock LLM Note Adviser chat. */
+  noteAdviserOpen: boolean;
+  setNoteAdviserOpen: (open: boolean) => void;
+  toggleNoteAdviser: () => void;
 }
 
 export const useAppStore = create<AppState>((set) => ({
@@ -211,7 +236,7 @@ export const useAppStore = create<AppState>((set) => ({
   setTimerOpen: (open) => set({ timerOpen: open }),
   setTimerRunning: (running) => set({ timerRunning: running }),
 
-  rocketPanelCollapsed: false,
+  rocketPanelCollapsed: true,
   setRocketPanelCollapsed: (collapsed) => set({ rocketPanelCollapsed: collapsed }),
 
   notesSidebarCollapsed: false,
@@ -225,4 +250,8 @@ export const useAppStore = create<AppState>((set) => ({
 
   quickCaptureOpen: false,
   setQuickCaptureOpen: (open) => set({ quickCaptureOpen: open }),
+
+  noteAdviserOpen: false,
+  setNoteAdviserOpen: (open) => set({ noteAdviserOpen: open }),
+  toggleNoteAdviser: () => set((s) => ({ noteAdviserOpen: !s.noteAdviserOpen })),
 }));

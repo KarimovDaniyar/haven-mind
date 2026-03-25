@@ -1,4 +1,55 @@
-import { Note, TimerSession } from '../store/appStore';
+import { Note, TimerSession, CanvasMainPage } from '../store/appStore';
+import { createDefaultCanvasMermaidDiagrams } from './defaultCanvasErMermaid';
+
+/** Demo markdown for the canvas A4 main note — covers every supported construct. */
+export const DEFAULT_CANVAS_MAIN_PAGE_CONTENT = `# Your desk, one sheet at a time
+
+This **main note** is the center of the workspace: a plain *sheet* you can extend downward as ideas grow. Treat it as the place where scattered thoughts become something you can act on.
+
+## Why a single surface helps
+
+> Attention is finite. When every idea has its own tab, you pay a navigation tax. One long sheet keeps context in view and nudges you toward *sequential* thinking.
+
+### A third-level heading
+
+Use \`focus blocks\` as anchors: name the block, start a timer, and write only inside that window. Inline code like \`pomodoro\` is easy to spot when you scan.
+
+---
+
+## Markdown you can use here
+
+| Element | Purpose | Tip |
+|---------|---------|-----|
+| Headings | Structure | Keep hierarchy shallow |
+| **Bold** / *italic* | Emphasis | Sparingly |
+| Lists | Steps & options | Break up dense prose |
+| Tables | Compare ideas | Align columns with pipes |
+| \`code\` | Terms & commands | Monospace in the flow |
+| [[wiki-links]] | Jump to notes | Match note titles |
+
+### Numbered habits that stick
+
+1. Capture first — polish later  
+2. Link related notes so the graph stays honest  
+3. Review the sheet weekly and archive what aged out  
+
+### Bullets for quick capture
+
+- Close unrelated apps before a deep-work block  
+- Keep the main note open; it reminds you what matters *right now*  
+- When stuck, write one honest sentence — momentum follows  
+
+Related reading in your library: [[Deep work principles]], [[Flow state]], and [[Time blocking]] for shaping the week.
+
+---
+
+*End of demo — click anywhere on the sheet to edit, then click the canvas to save and render.*
+
+Use \`/pagebreak\` on its own line (or the \`/\` menu → Page break) for a hard page break. Dashed lines mark soft A4 boundaries; use **PDF** on the action toolbar above this sheet to print.`;
+
+export function createDefaultCanvasMainPages(): CanvasMainPage[] {
+  return [{ id: 'main-p-1', content: DEFAULT_CANVAS_MAIN_PAGE_CONTENT }];
+}
 
 const now = Date.now();
 const day = 86400000;
@@ -151,6 +202,8 @@ At the end of each work day:
     canvasGroups: [
       { id: 'cg-1', x: 80, y: 50, width: 580, height: 320, label: 'Core ideas' },
     ],
+    canvasMermaidDiagrams: createDefaultCanvasMermaidDiagrams(),
+    canvasMainPages: createDefaultCanvasMainPages(),
   },
 ];
 

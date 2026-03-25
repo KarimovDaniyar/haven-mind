@@ -1,9 +1,14 @@
 import React, { useState, useRef, useCallback, useEffect, useLayoutEffect, useMemo } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
-import { Hand, MousePointer2, Plus, Square, Pencil, Maximize2, ZoomIn, ZoomOut, Circle, Type, Triangle } from 'lucide-react';
-import { useAppStore, CanvasCard, CanvasArrow, CanvasGroup, InkStroke, CanvasShape, CanvasFreeText, CanvasShapeType } from '../store/appStore';
+import { Hand, MousePointer2, Plus, Square, Pencil, Maximize2, ZoomIn, ZoomOut, Type } from 'lucide-react';
+import { useAppStore, CanvasCard, CanvasArrow, CanvasGroup, InkStroke, CanvasFreeText, CanvasMermaidDiagram } from '../store/appStore';
 import { renderMarkdown } from '../utils/markdown';
-import { shapeEdgePoint, shapeBounds, pointInShapePad, defaultShapeBorderColor } from '../utils/canvasAnnotations';
+import { createDefaultCanvasMainPages } from '../data/sampleData';
+import CanvasMainPages from './CanvasMainPages';
+import CanvasActionToolbar from './CanvasActionToolbar';
+import MermaidDiagramModal from './MermaidDiagramModal';
+import MermaidCanvasContent from './MermaidCanvasContent';
+import { MAIN_PAGE_STACK_LEFT, MAIN_PAGE_STACK_TOP } from '../utils/mainPageCanvasLayout';
 
 // ── Template data ──────────────────────────────────────────────────────────────
 const BUILT_IN_TEMPLATES = [
@@ -68,9 +73,7 @@ function hexToRgba(hex: string, alpha: number): string {
 
 
 
-type CanvasTool = 'select' | 'pan' | 'card' | 'frame' | 'shape' | 'text' | 'ink';
-
-type ArrowDragSource = { kind: 'card'; id: string } | { kind: 'shape'; id: string };
+type CanvasTool = 'select' | 'pan' | 'card' | 'frame' | 'text' | 'ink';
 
 // Point-in-polygon (ray casting)
 function pointInPolygon(point: { x: number; y: number }, polygon: { x: number; y: number }[]): boolean {
@@ -91,13 +94,6 @@ function pointsToSvgPath(points: { x: number; y: number }[]): string {
     d += ` L ${points[i].x} ${points[i].y}`;
   }
   return d;
-}
-
-function shapeStrokeWidthPx(s: CanvasShape): number {
-  if (s.borderWidth === 1) return 1;
-  if (s.borderWidth === 2) return 2;
-  if (s.borderWidth === 3) return 3;
-  return 1.5;
 }
 
 const FREE_TEXT_COLORS = {
@@ -150,7 +146,7 @@ export default function CanvasView() {
 
   // Arrow drawing
   const [drawingArrow, setDrawingArrow] = useState<{
-    from: ArrowDragSource;
+    fromCardId: string;
     fromSide: string;
     currentX: number;
     currentY: number;
@@ -199,21 +195,10 @@ export default function CanvasView() {
   // Frame customization popover
   const [frameCustomize, setFrameCustomize] = useState<{ frameId: string; x: number; y: number } | null>(null);
 
-  // Shapes + free text (layer below cards)
-  const [selectedShapeId, setSelectedShapeId] = useState<string | null>(null);
   const [selectedFreeTextId, setSelectedFreeTextId] = useState<string | null>(null);
-  const [hoveredShapeId, setHoveredShapeId] = useState<string | null>(null);
-  const [drawingShapeBox, setDrawingShapeBox] = useState<{ startX: number; startY: number; curX: number; curY: number } | null>(null);
-  const [shapeToolType, setShapeToolType] = useState<CanvasShapeType>('rect');
   const [textToolStyle, setTextToolStyle] = useState<{
     fontSize: number; bold: boolean; italic: boolean; color: string;
   }>({ fontSize: 16, bold: false, italic: false, color: 'hsl(var(--foreground))' });
-  const [draggingShape, setDraggingShape] = useState<{ id: string; startX: number; startY: number; ox: number; oy: number } | null>(null);
-  const [resizingShape, setResizingShape] = useState<{
-    id: string; corner: 'nw' | 'ne' | 'sw' | 'se'; startX: number; startY: number; ox: number; oy: number; ow: number; oh: number;
-  } | null>(null);
-  const [editingShapeTextId, setEditingShapeTextId] = useState<string | null>(null);
-  const [shapeCustomize, setShapeCustomize] = useState<{ shapeId: string; x: number; y: number } | null>(null);
   const [editingFreeTextId, setEditingFreeTextId] = useState<string | null>(null);
   const [resizingFreeText, setResizingFreeText] = useState<{
     id: string; startX: number; startW: number;
@@ -222,16 +207,29 @@ export default function CanvasView() {
     id: string; startX: number; startY: number; ox: number; oy: number;
   } | null>(null);
   const freeTextEditRef = useRef<HTMLTextAreaElement>(null);
-  const shapeTextEditRef = useRef<HTMLTextAreaElement>(null);
+
+  const [selectedMermaidDiagramId, setSelectedMermaidDiagramId] = useState<string | null>(null);
+  const [draggingMermaidDiagram, setDraggingMermaidDiagram] = useState<{
+    id: string; startX: number; startY: number; ox: number; oy: number;
+  } | null>(null);
+
+  const [editingMainPageId, setEditingMainPageId] = useState<string | null>(null);
+  const [mermaidModalOpen, setMermaidModalOpen] = useState(false);
 
   const inkColors = ['hsl(var(--foreground))', '#EF4444', '#F59E0B', '#10B981', '#3B82F6', '#8B5CF6'];
 
   const cards = note?.canvasCards || [];
   const arrows = note?.canvasArrows || [];
   const groups = note?.canvasGroups || [];
-  const shapes = note?.canvasShapes || [];
   const freeTexts = note?.canvasFreeTexts || [];
+  const mermaidDiagrams = note?.canvasMermaidDiagrams || [];
   const inkStrokes = note?.inkStrokes || [];
+
+  const mergedMainPageMarkdown = useMemo(() => {
+    const pages = note?.canvasMainPages;
+    if (!pages?.length) return '';
+    return pages.map((p) => p.content).join('\n\n/pagebreak\n\n');
+  }, [note?.canvasMainPages]);
 
 
   const getEffectiveCardContent = (card: CanvasCard) => {
@@ -297,6 +295,30 @@ export default function CanvasView() {
       setCardSlashIndex(0);
     }
   }, [editingCard]);
+
+  useLayoutEffect(() => {
+    if (!note) return;
+    if (note.canvasMainPages && note.canvasMainPages.length > 0) return;
+    updateNote(note.id, { canvasMainPages: createDefaultCanvasMainPages() });
+  }, [note?.id, note?.canvasMainPages, note, updateNote]);
+
+  const updateMainPageContent = useCallback((id: string, content: string) => {
+    if (!note) return;
+    const list = note.canvasMainPages || [];
+    updateNote(note.id, {
+      canvasMainPages: list.map((p) => (p.id === id ? { ...p, content } : p)),
+    });
+  }, [note, updateNote]);
+
+  const addMainPage = useCallback(() => {
+    if (!note) return;
+    const list = note.canvasMainPages || [];
+    const newId = `main-p-${Date.now()}`;
+    updateNote(note.id, {
+      canvasMainPages: [...list, { id: newId, content: '' }],
+    });
+    setEditingMainPageId(newId);
+  }, [note, updateNote]);
 
   const filteredCardSlashCommands = useMemo(() => {
     if (!cardSlashFilter) return [...slashCommands];
@@ -368,15 +390,14 @@ export default function CanvasView() {
 
   // Close context menus on outside click
   useEffect(() => {
-    if (!cardContextMenu && !frameCustomize && !shapeCustomize) return;
+    if (!cardContextMenu && !frameCustomize) return;
     const close = () => {
       setCardContextMenu(null);
       setFrameCustomize(null);
-      setShapeCustomize(null);
     };
     window.addEventListener('click', close);
     return () => window.removeEventListener('click', close);
-  }, [cardContextMenu, frameCustomize, shapeCustomize]);
+  }, [cardContextMenu, frameCustomize]);
 
   const updateCards = useCallback((newCards: CanvasCard[]) => {
     if (note) updateNote(note.id, { canvasCards: newCards });
@@ -396,12 +417,12 @@ export default function CanvasView() {
 
 
 
-  const updateShapes = useCallback((next: CanvasShape[]) => {
-    if (note) updateNote(note.id, { canvasShapes: next });
-  }, [note, updateNote]);
-
   const updateFreeTexts = useCallback((next: CanvasFreeText[]) => {
     if (note) updateNote(note.id, { canvasFreeTexts: next });
+  }, [note, updateNote]);
+
+  const updateMermaidDiagrams = useCallback((next: CanvasMermaidDiagram[]) => {
+    if (note) updateNote(note.id, { canvasMermaidDiagrams: next });
   }, [note, updateNote]);
 
   const bringCardToFront = useCallback((id: string) => {
@@ -420,14 +441,6 @@ export default function CanvasView() {
     updateGroups([...list.filter((g) => g.id !== id), item]);
   }, [note, updateGroups]);
 
-  const bringShapeToFront = useCallback((id: string) => {
-    if (!note) return;
-    const list = note.canvasShapes || [];
-    const item = list.find((s) => s.id === id);
-    if (!item) return;
-    updateShapes([...list.filter((s) => s.id !== id), item]);
-  }, [note, updateShapes]);
-
   const bringFreeTextToFront = useCallback((id: string) => {
     if (!note) return;
     const list = note.canvasFreeTexts || [];
@@ -436,24 +449,13 @@ export default function CanvasView() {
     updateFreeTexts([...list.filter((t) => t.id !== id), item]);
   }, [note, updateFreeTexts]);
 
-  const commitShapeWithType = useCallback((x: number, y: number, w: number, h: number, shapeType: CanvasShapeType) => {
-    const id = `sh-${Date.now()}`;
-    const border = defaultShapeBorderColor();
-    const nw: CanvasShape = {
-      id,
-      shapeType,
-      x,
-      y,
-      width: Math.max(8, w),
-      height: Math.max(8, h),
-      borderColor: border,
-      borderStyle: 'solid',
-      text: '',
-    };
-    updateShapes([...shapes, nw]);
-    setSelectedShapeId(id);
-    setTool('select');
-  }, [shapes, updateShapes]);
+  const bringMermaidDiagramToFront = useCallback((id: string) => {
+    if (!note) return;
+    const list = note.canvasMermaidDiagrams || [];
+    const item = list.find((d) => d.id === id);
+    if (!item) return;
+    updateMermaidDiagrams([...list.filter((d) => d.id !== id), item]);
+  }, [note, updateMermaidDiagrams]);
 
   // Convert screen coords to canvas coords
   const screenToCanvas = useCallback((clientX: number, clientY: number) => {
@@ -520,7 +522,7 @@ export default function CanvasView() {
       const isInputActive = document.activeElement?.tagName === 'INPUT' || 
                            document.activeElement?.tagName === 'TEXTAREA' || 
                            (document.activeElement as HTMLElement)?.isContentEditable;
-      if (editingCard || editingArrowLabel || editingFreeTextId || editingShapeTextId) return;
+      if (editingCard || editingArrowLabel || editingFreeTextId || editingMainPageId) return;
       if (isInputActive) return;
 
       if (e.key === 'Escape' && (resizingCard || resizingFrame)) {
@@ -534,7 +536,6 @@ export default function CanvasView() {
       if (matchesBinding(e, shortcutsConfig.panTool)) setTool('pan');
       if (matchesBinding(e, shortcutsConfig.inkTool)) setTool('ink');
       if (matchesBinding(e, shortcutsConfig.frameTool)) setTool('frame');
-      if (matchesBinding(e, shortcutsConfig.shapeTool)) setTool('shape');
       if (matchesBinding(e, shortcutsConfig.textTool)) setTool('text');
       if (matchesBinding(e, shortcutsConfig.fitCanvas)) handleFitView();
 
@@ -546,10 +547,9 @@ export default function CanvasView() {
         updateGroups(groups.filter((g) => g.id !== selectedFrame));
         setSelectedFrame(null);
       }
-      if ((e.key === 'Delete' || e.key === 'Backspace') && selectedShapeId) {
-        updateShapes(shapes.filter((s) => s.id !== selectedShapeId));
-        updateArrows(arrows.filter((a) => a.fromShapeId !== selectedShapeId && a.toShapeId !== selectedShapeId));
-        setSelectedShapeId(null);
+      if ((e.key === 'Delete' || e.key === 'Backspace') && selectedMermaidDiagramId) {
+        updateMermaidDiagrams(mermaidDiagrams.filter((d) => d.id !== selectedMermaidDiagramId));
+        setSelectedMermaidDiagramId(null);
       }
       if ((e.key === 'Delete' || e.key === 'Backspace') && selectedFreeTextId) {
         updateFreeTexts(freeTexts.filter((t) => t.id !== selectedFreeTextId));
@@ -563,8 +563,8 @@ export default function CanvasView() {
         setSelectedCards(new Set());
         setSelectedArrow(null);
         setSelectedFrame(null);
-        setSelectedShapeId(null);
         setSelectedFreeTextId(null);
+        setSelectedMermaidDiagramId(null);
       }
 
       // Undo for ink
@@ -595,15 +595,15 @@ export default function CanvasView() {
       editingCard,
       editingArrowLabel,
       editingFreeTextId,
-      editingShapeTextId,
+      editingMainPageId,
       selectedArrow,
       selectedFrame,
-      selectedShapeId,
       selectedFreeTextId,
+      selectedMermaidDiagramId,
       arrows,
       groups,
-      shapes,
       freeTexts,
+      mermaidDiagrams,
       tool,
       inkStrokes,
       shortcutsConfig,
@@ -612,8 +612,8 @@ export default function CanvasView() {
       updateArrows,
       updateGroups,
       updateCards,
-      updateShapes,
       updateFreeTexts,
+      updateMermaidDiagrams,
     ]);
 
   // Alt key for eraser in ink mode
@@ -649,24 +649,16 @@ export default function CanvasView() {
     const card = cards.find((c) => c.id === cardId);
     if (!card) return;
     const pos = getCardCenter(card, side);
-    setDrawingArrow({ from: { kind: 'card', id: cardId }, fromSide: side, currentX: pos.x, currentY: pos.y });
+    setDrawingArrow({ fromCardId: cardId, fromSide: side, currentX: pos.x, currentY: pos.y });
   };
-
-  const startArrowDrawFromShape = (shapeId: string, side: string, e: React.MouseEvent) => {
-    e.stopPropagation();
-    e.preventDefault();
-    const sh = shapes.find((s) => s.id === shapeId);
-    if (!sh) return;
-    const pos = shapeEdgePoint(sh, side as 'top' | 'right' | 'bottom' | 'left');
-    setDrawingArrow({ from: { kind: 'shape', id: shapeId }, fromSide: side, currentX: pos.x, currentY: pos.y });
-  };
-
-  const arrowSourceMatches = (src: ArrowDragSource, kind: 'card' | 'shape', id: string) =>
-    src.kind === kind && src.id === id;
 
   // ---- MOUSE HANDLERS ----
   const handleMouseDown = (e: React.MouseEvent) => {
     const target = e.target as HTMLElement;
+
+    if (editingMainPageId && !target.closest('[data-main-page-doc]')) {
+      setEditingMainPageId(null);
+    }
 
     // Ignore if clicking on a card, handle, or UI element
     if (
@@ -674,10 +666,13 @@ export default function CanvasView() {
       target.closest('[data-handle]') ||
       target.closest('[data-toolbar]') ||
       target.closest('[data-frame-label]') ||
-      target.closest('[data-canvas-shape]') ||
       target.closest('[data-free-text]') ||
-      target.closest('[data-shape-resize]') ||
-      target.closest('[data-free-text-toolbar]')
+      target.closest('[data-free-text-toolbar]') ||
+      target.closest('[data-canvas-mermaid]') ||
+      target.closest('[data-main-page-doc]') ||
+      target.closest('[data-main-page-add]') ||
+      target.closest('[data-main-page-slash]') ||
+      target.closest('[data-action-toolbar]')
     ) return;
 
     const { x, y } = screenToCanvas(e.clientX, e.clientY);
@@ -701,11 +696,6 @@ export default function CanvasView() {
       return;
     }
 
-    if (tool === 'shape') {
-      setDrawingShapeBox({ startX: x, startY: y, curX: x, curY: y });
-      return;
-    }
-
     if (tool === 'text') {
       const id = `ft-${Date.now()}`;
       const nw: CanvasFreeText = {
@@ -722,7 +712,6 @@ export default function CanvasView() {
       };
       updateFreeTexts([...freeTexts, nw]);
       setSelectedFreeTextId(id);
-      setSelectedShapeId(null);
       setSelectedCards(new Set());
       setEditingFreeTextId(id);
       setTool('select');
@@ -758,8 +747,8 @@ export default function CanvasView() {
       setSelectedCards(new Set());
       setSelectedArrow(null);
       setSelectedFrame(null);
-      setSelectedShapeId(null);
       setSelectedFreeTextId(null);
+      setSelectedMermaidDiagramId(null);
     }
   };
 
@@ -836,43 +825,6 @@ export default function CanvasView() {
       return;
     }
 
-    if (drawingShapeBox) {
-      setDrawingShapeBox({ ...drawingShapeBox, curX: x, curY: y });
-      return;
-    }
-
-    if (draggingShape) {
-      const dx = x - draggingShape.startX;
-      const dy = y - draggingShape.startY;
-      updateShapes(shapes.map((s) =>
-        s.id === draggingShape.id ? { ...s, x: draggingShape.ox + dx, y: draggingShape.oy + dy } : s
-      ));
-      return;
-    }
-
-    if (resizingShape) {
-      const { id, corner, ox, oy, ow, oh, startX, startY } = resizingShape;
-      const dx = x - startX;
-      const dy = y - startY;
-      let nx = ox, ny = oy, nw = ow, nh = oh;
-      if (corner === 'se') { nw = Math.max(8, ow + dx); nh = Math.max(8, oh + dy); }
-      if (corner === 'sw') {
-        nw = Math.max(8, ow - dx); nh = Math.max(8, oh + dy);
-        nx = ox + (ow - nw);
-      }
-      if (corner === 'ne') {
-        nw = Math.max(8, ow + dx); nh = Math.max(8, oh - dy);
-        ny = oy + (oh - nh);
-      }
-      if (corner === 'nw') {
-        nw = Math.max(8, ow - dx); nh = Math.max(8, oh - dy);
-        nx = ox + (ow - nw);
-        ny = oy + (oh - nh);
-      }
-      updateShapes(shapes.map((s) => (s.id === id ? { ...s, x: nx, y: ny, width: nw, height: nh } : s)));
-      return;
-    }
-
     if (draggingFreeText) {
       const dx = x - draggingFreeText.startX;
       const dy = y - draggingFreeText.startY;
@@ -886,6 +838,17 @@ export default function CanvasView() {
       const dx = x - resizingFreeText.startX;
       const newW = Math.max(40, Math.min(600, resizingFreeText.startW + dx));
       updateFreeTexts(freeTexts.map((t) => t.id === resizingFreeText.id ? { ...t, width: newW } : t));
+      return;
+    }
+
+    if (draggingMermaidDiagram) {
+      const dx = x - draggingMermaidDiagram.startX;
+      const dy = y - draggingMermaidDiagram.startY;
+      updateMermaidDiagrams(mermaidDiagrams.map((d) =>
+        d.id === draggingMermaidDiagram.id
+          ? { ...d, x: draggingMermaidDiagram.ox + dx, y: draggingMermaidDiagram.oy + dy }
+          : d
+      ));
       return;
     }
 
@@ -932,37 +895,18 @@ export default function CanvasView() {
       };
 
       const targetCard = cards.find((c) => {
-        if (drawingArrow.from.kind === 'card' && drawingArrow.from.id === c.id) return false;
+        if (drawingArrow.fromCardId === c.id) return false;
         const r = getCardRect(c);
         return x >= r.x - 10 && x <= r.x + r.w + 10 && y >= r.y - 10 && y <= r.y + r.h + 10;
       });
-      const targetShape = !targetCard
-        ? shapes.find((s) => {
-            if (drawingArrow.from.kind === 'shape' && drawingArrow.from.id === s.id) return false;
-            return pointInShapePad(s, x, y, 12);
-          })
-        : undefined;
 
       if (targetCard) {
         const r = getCardRect(targetCard);
         const toSide = pickSideForRect(r.x, r.y, r.w, r.h);
         const newArrow: CanvasArrow = {
           id: `ca-${Date.now()}`,
-          fromCardId: drawingArrow.from.kind === 'card' ? drawingArrow.from.id : undefined,
-          fromShapeId: drawingArrow.from.kind === 'shape' ? drawingArrow.from.id : undefined,
+          fromCardId: drawingArrow.fromCardId,
           toCardId: targetCard.id,
-          fromSide: drawingArrow.fromSide as CanvasArrow['fromSide'],
-          toSide,
-        };
-        updateArrows([...arrows, newArrow]);
-      } else if (targetShape) {
-        const r = shapeBounds(targetShape);
-        const toSide = pickSideForRect(r.x, r.y, r.w, r.h);
-        const newArrow: CanvasArrow = {
-          id: `ca-${Date.now()}`,
-          fromCardId: drawingArrow.from.kind === 'card' ? drawingArrow.from.id : undefined,
-          fromShapeId: drawingArrow.from.kind === 'shape' ? drawingArrow.from.id : undefined,
-          toShapeId: targetShape.id,
           fromSide: drawingArrow.fromSide as CanvasArrow['fromSide'],
           toSide,
         };
@@ -991,22 +935,9 @@ export default function CanvasView() {
     if (resizingFrame) { setResizingFrame(null); return; }
     if (resizingCard) { setResizingCard(null); return; }
 
-    if (drawingShapeBox) {
-      const fx = Math.min(drawingShapeBox.startX, drawingShapeBox.curX);
-      const fy = Math.min(drawingShapeBox.startY, drawingShapeBox.curY);
-      const fw = Math.abs(drawingShapeBox.curX - drawingShapeBox.startX);
-      const fh = Math.abs(drawingShapeBox.curY - drawingShapeBox.startY);
-      if (fw > 4 && fh > 4) {
-        commitShapeWithType(fx, fy, fw, fh, shapeToolType);
-      }
-      setDrawingShapeBox(null);
-      return;
-    }
-
-    if (draggingShape) { setDraggingShape(null); return; }
-    if (resizingShape) { setResizingShape(null); return; }
     if (draggingFreeText) { setDraggingFreeText(null); return; }
     if (resizingFreeText) { setResizingFreeText(null); return; }
+    if (draggingMermaidDiagram) { setDraggingMermaidDiagram(null); return; }
 
     if (lassoRect) {
       const lx = Math.min(lassoRect.startX, lassoRect.currentX);
@@ -1035,6 +966,7 @@ export default function CanvasView() {
 
   // Card drag start — expands selection to include magnet-group siblings
   const startCardDrag = (cardId: string, cx: number, cy: number) => {
+    setSelectedMermaidDiagramId(null);
     const base = selectedCards.has(cardId) ? selectedCards : new Set([cardId]);
     const expanded = base;
     setSelectedCards(expanded);
@@ -1080,13 +1012,12 @@ export default function CanvasView() {
   };
 
   const getCursor = () => {
-    if (draggingFreeText) return 'grabbing';
-    if (resizingCard || resizingFrame || resizingShape || resizingFreeText) return 'nwse-resize';
+    if (draggingFreeText || draggingMermaidDiagram) return 'grabbing';
+    if (resizingCard || resizingFrame || resizingFreeText) return 'nwse-resize';
     if (tool === 'pan' || isPanning) return 'grab';
     if (tool === 'ink' && isErasing) return 'cell';
     if (tool === 'ink') return 'crosshair';
     if (tool === 'frame') return 'crosshair';
-    if (tool === 'shape') return 'crosshair';
     if (tool === 'text') return 'text';
     if (tool === 'card') return 'copy';
     return 'default';
@@ -1154,11 +1085,9 @@ export default function CanvasView() {
           setDrawingArrow(null);
           setCurrentInkPoints(null);
           setResizingCard(null);
-          setDrawingShapeBox(null);
-          setDraggingShape(null);
-          setResizingShape(null);
           setDraggingFreeText(null);
           setResizingFreeText(null);
+          setDraggingMermaidDiagram(null);
         }}
         style={{
           cursor: getCursor(),
@@ -1167,7 +1096,37 @@ export default function CanvasView() {
           backgroundPosition: `${offset.x}px ${offset.y}px`,
         }}
       >
+        {note && (
+          <div className="pointer-events-none absolute inset-x-0 top-0 z-[50] flex justify-center pt-6 sm:pt-7">
+            <div className="pointer-events-auto">
+              <CanvasActionToolbar
+                hasMainPages={Boolean(note.canvasMainPages && note.canvasMainPages.length > 0)}
+                mergedMarkdownForPrint={mergedMainPageMarkdown}
+                onOpenDiagram={() => setMermaidModalOpen(true)}
+              />
+            </div>
+          </div>
+        )}
+
         <div className="absolute inset-0" style={{ transform: `translate(${offset.x}px, ${offset.y}px) scale(${zoom})`, transformOrigin: '0 0' }}>
+          {note.canvasMainPages && note.canvasMainPages.length > 0 && (
+            <div
+              className="pointer-events-none absolute z-[2]"
+              style={{ left: MAIN_PAGE_STACK_LEFT, top: MAIN_PAGE_STACK_TOP }}
+            >
+              <div className="pointer-events-auto">
+                <CanvasMainPages
+                  pages={note.canvasMainPages}
+                  editingId={editingMainPageId}
+                  setEditingId={setEditingMainPageId}
+                  onUpdateContent={updateMainPageContent}
+                  onAddPage={addMainPage}
+                  onWikiLink={handleLinkClick}
+                />
+              </div>
+            </div>
+          )}
+
           {/* Groups/Frames */}
           {groups.map((group) => {
             const bStyle = group.borderStyle || 'dashed';
@@ -1246,208 +1205,6 @@ export default function CanvasView() {
             />
           )}
 
-          {drawingShapeBox && (
-            <div
-              className="absolute border-[1.5px] border-dashed rounded-md pointer-events-none z-[10]"
-              style={{
-                left: Math.min(drawingShapeBox.startX, drawingShapeBox.curX),
-                top: Math.min(drawingShapeBox.startY, drawingShapeBox.curY),
-                width: Math.abs(drawingShapeBox.curX - drawingShapeBox.startX),
-                height: Math.abs(drawingShapeBox.curY - drawingShapeBox.startY),
-                borderColor: 'hsl(var(--accent))',
-                backgroundColor: 'rgba(139,111,71,0.06)',
-              }}
-            />
-          )}
-
-          {shapes.map((sh) => {
-            const isSel = selectedShapeId === sh.id;
-            const isHover = hoveredShapeId === sh.id;
-            const sw = shapeStrokeWidthPx(sh);
-            const bc = sh.borderColor || defaultShapeBorderColor();
-            const bs = sh.borderStyle || 'solid';
-            const fill = sh.fill;
-            const showHandles = (isHover || (drawingArrow && !arrowSourceMatches(drawingArrow.from, 'shape', sh.id))) && editingShapeTextId !== sh.id;
-
-            return (
-              <div
-                key={sh.id}
-                data-canvas-shape
-                className={`absolute z-[10] ${isSel ? 'ring-1 ring-accent/60' : ''}`}
-                style={{ left: sh.x, top: sh.y, width: sh.width, height: sh.height }}
-                onMouseEnter={() => setHoveredShapeId(sh.id)}
-                onMouseLeave={() => setHoveredShapeId(null)}
-                onMouseDown={(e) => {
-                  if (e.button !== 0) return;
-                  e.stopPropagation();
-                  bringShapeToFront(sh.id);
-                  setSelectedShapeId(sh.id);
-                  setSelectedCards(new Set());
-                  setSelectedFreeTextId(null);
-                  const { x, y } = screenToCanvas(e.clientX, e.clientY);
-                  setDraggingShape({ id: sh.id, startX: x, startY: y, ox: sh.x, oy: sh.y });
-                }}
-                onDoubleClick={(e) => {
-                  e.stopPropagation();
-                  setEditingShapeTextId(sh.id);
-                  setTimeout(() => shapeTextEditRef.current?.focus(), 0);
-                }}
-                onContextMenu={(e) => {
-                  e.preventDefault();
-                  e.stopPropagation();
-                  setShapeCustomize({ shapeId: sh.id, x: e.clientX, y: e.clientY });
-                }}
-              >
-                {sh.shapeType === 'rect' && (
-                  <div
-                    className="w-full h-full box-border pointer-events-none"
-                    style={{
-                      borderRadius: 6,
-                      backgroundColor: fill || 'transparent',
-                      borderWidth: bs === 'none' ? 0 : sw,
-                      borderStyle: bs === 'dashed' ? 'dashed' : 'solid',
-                      borderColor: bs === 'none' ? 'transparent' : bc,
-                    }}
-                  />
-                )}
-                {sh.shapeType === 'ellipse' && (
-                  <div
-                    className="w-full h-full box-border rounded-[50%] pointer-events-none"
-                    style={{
-                      backgroundColor: fill || 'transparent',
-                      borderWidth: bs === 'none' ? 0 : sw,
-                      borderStyle: bs === 'dashed' ? 'dashed' : 'solid',
-                      borderColor: bs === 'none' ? 'transparent' : bc,
-                    }}
-                  />
-                )}
-                {(sh.shapeType === 'triangle' || sh.shapeType === 'line') && (() => {
-                  const w = sh.width;
-                  const h = sh.height;
-                  const pts = `${w / 2},0 ${w},${h} 0,${h}`;
-                  const dash = bs === 'dashed' ? `${6 * (sw / 1.5)} ${4 * (sw / 1.5)}` : undefined;
-                  return (
-                    <svg className="absolute left-0 top-0 overflow-visible pointer-events-none" width={w} height={h}>
-                      <polygon
-                        points={pts}
-                        fill={fill || 'none'}
-                        stroke={bs === 'none' ? 'none' : bc}
-                        strokeWidth={bs === 'none' ? 0 : sw}
-                        strokeDasharray={dash}
-                        strokeLinejoin="round"
-                      />
-                    </svg>
-                  );
-                })()}
-
-                {editingShapeTextId === sh.id && (
-                  <textarea
-                    ref={shapeTextEditRef}
-                    data-shape-text-edit
-                    className="absolute inset-0 m-auto w-[90%] h-[90%] min-h-[24px] bg-transparent outline-none text-center resize-none border-none font-sans pointer-events-auto"
-                    style={{ fontSize: 13, color: bc, fontFamily: 'Inter, ui-sans-serif, system-ui, sans-serif' }}
-                    value={sh.text || ''}
-                    onChange={(e) => updateShapes(shapes.map((s) => s.id === sh.id ? { ...s, text: e.target.value } : s))}
-                    onMouseDown={(e) => e.stopPropagation()}
-                    onKeyDown={(e) => {
-                      if (e.key === 'Escape') {
-                        e.preventDefault();
-                        setEditingShapeTextId(null);
-                        (e.target as HTMLTextAreaElement).blur();
-                      }
-                    }}
-                    onBlur={() => setEditingShapeTextId(null)}
-                  />
-                )}
-
-                {!editingShapeTextId && (sh.text || '').trim() && (
-                  <div
-                    className="absolute inset-0 flex items-center justify-center pointer-events-none px-1 text-center font-sans whitespace-pre-wrap break-words"
-                    style={{ fontSize: 13, color: bc, fontFamily: 'Inter, ui-sans-serif, system-ui, sans-serif' }}
-                  >
-                    {sh.text}
-                  </div>
-                )}
-
-                {isSel && !editingShapeTextId && (
-                  <>
-                    {(['nw', 'ne', 'sw', 'se'] as const).map((corner) => {
-                      let style: React.CSSProperties = { width: 8, height: 8 };
-                      if (corner === 'nw') style = { ...style, left: -4, top: -4, cursor: 'nwse-resize' };
-                      if (corner === 'ne') style = { ...style, right: -4, top: -4, cursor: 'nesw-resize' };
-                      if (corner === 'sw') style = { ...style, left: -4, bottom: -4, cursor: 'nesw-resize' };
-                      if (corner === 'se') style = { ...style, right: -4, bottom: -4, cursor: 'nwse-resize' };
-                      return (
-                        <div
-                          key={corner}
-                          data-shape-resize
-                          className="absolute z-20 bg-background border border-accent rounded-sm"
-                          style={style}
-                          onMouseDown={(e) => {
-                            e.stopPropagation();
-                            e.preventDefault();
-                            const { x, y } = screenToCanvas(e.clientX, e.clientY);
-                            setResizingShape({
-                              id: sh.id,
-                              corner,
-                              startX: x,
-                              startY: y,
-                              ox: sh.x,
-                              oy: sh.y,
-                              ow: sh.width,
-                              oh: sh.height,
-                            });
-                          }}
-                        />
-                      );
-                    })}
-                  </>
-                )}
-
-                {showHandles && (
-                  <>
-                    {handles.map((side) => {
-                      let style: React.CSSProperties = {};
-                      if (side === 'top') style = { top: -4, left: '50%', marginLeft: -4 };
-                      if (side === 'bottom') style = { bottom: -4, left: '50%', marginLeft: -4 };
-                      if (side === 'left') style = { left: -4, top: '50%', marginTop: -4 };
-                      if (side === 'right') style = { right: -4, top: '50%', marginTop: -4 };
-                      return (
-                        <div
-                          key={side}
-                          data-handle
-                          className={`absolute w-3 h-3 flex items-center justify-center z-20 ${
-                            drawingArrow ? 'cursor-alias' : 'cursor-crosshair'
-                          }`}
-                          style={style}
-                          onDragStart={(e) => e.preventDefault()}
-                          onMouseDown={(e) => !drawingArrow && startArrowDrawFromShape(sh.id, side, e)}
-                          onMouseUp={(e) => {
-                            if (drawingArrow && !arrowSourceMatches(drawingArrow.from, 'shape', sh.id)) {
-                              e.stopPropagation();
-                              const newArrow: CanvasArrow = {
-                                id: `ca-${Date.now()}`,
-                                fromCardId: drawingArrow.from.kind === 'card' ? drawingArrow.from.id : undefined,
-                                fromShapeId: drawingArrow.from.kind === 'shape' ? drawingArrow.from.id : undefined,
-                                toShapeId: sh.id,
-                                fromSide: drawingArrow.fromSide as CanvasArrow['fromSide'],
-                                toSide: side,
-                              };
-                              updateArrows([...arrows, newArrow]);
-                              setDrawingArrow(null);
-                            }
-                          }}
-                        >
-                          <div className="w-2 h-2 rounded-full bg-background border-[1.5px] border-accent" />
-                        </div>
-                      );
-                    })}
-                  </>
-                )}
-              </div>
-            );
-          })}
-
           {freeTexts.map((ft) => (
             <div
               key={ft.id}
@@ -1464,8 +1221,8 @@ export default function CanvasView() {
                 e.stopPropagation();
                 bringFreeTextToFront(ft.id);
                 setSelectedFreeTextId(ft.id);
+                setSelectedMermaidDiagramId(null);
                 setSelectedCards(new Set());
-                setSelectedShapeId(null);
                 const { x, y } = screenToCanvas(e.clientX, e.clientY);
                 setDraggingFreeText({ id: ft.id, startX: x, startY: y, ox: ft.x, oy: ft.y });
               }}
@@ -1588,6 +1345,41 @@ export default function CanvasView() {
             </div>
           ))}
 
+          {mermaidDiagrams.map((d) => (
+            <div
+              key={d.id}
+              data-canvas-mermaid
+              className={`absolute z-[11] w-fit cursor-move rounded-md bg-transparent ${
+                selectedMermaidDiagramId === d.id ? 'ring-1 ring-accent/70' : ''
+              }`}
+              style={{ left: d.x, top: d.y }}
+              onMouseDown={(e) => {
+                if (e.button !== 0) return;
+                e.stopPropagation();
+                bringMermaidDiagramToFront(d.id);
+                setSelectedMermaidDiagramId(d.id);
+                setSelectedCards(new Set());
+                setSelectedFreeTextId(null);
+                setSelectedArrow(null);
+                const { x, y } = screenToCanvas(e.clientX, e.clientY);
+                setDraggingMermaidDiagram({ id: d.id, startX: x, startY: y, ox: d.x, oy: d.y });
+              }}
+            >
+              {(d.svg.trim() || d.mermaidSource) && (
+                <MermaidCanvasContent
+                  diagramId={d.id}
+                  svg={d.svg}
+                  mermaidSource={d.mermaidSource}
+                  onPersistSvg={(out) =>
+                    updateMermaidDiagrams(
+                      mermaidDiagrams.map((x) => (x.id === d.id ? { ...x, svg: out } : x))
+                    )
+                  }
+                />
+              )}
+            </div>
+          ))}
+
           {/* Arrows SVG */}
           <svg className="absolute inset-0 pointer-events-none" style={{ overflow: 'visible', width: '100%', height: '100%' }}>
             <defs>
@@ -1597,16 +1389,13 @@ export default function CanvasView() {
             </defs>
 
             {arrows.map((arrow) => {
+              if (arrow.fromShapeId || arrow.toShapeId) return null;
               const fromCard = arrow.fromCardId ? cards.find((c) => c.id === arrow.fromCardId) : undefined;
-              const fromShape = arrow.fromShapeId ? shapes.find((s) => s.id === arrow.fromShapeId) : undefined;
               const toCard = arrow.toCardId ? cards.find((c) => c.id === arrow.toCardId) : undefined;
-              const toShape = arrow.toShapeId ? shapes.find((s) => s.id === arrow.toShapeId) : undefined;
               let from: { x: number; y: number } | null = null;
               let to: { x: number; y: number } | null = null;
               if (fromCard) from = getCardCenter(fromCard, arrow.fromSide);
-              else if (fromShape) from = shapeEdgePoint(fromShape, arrow.fromSide);
               if (toCard) to = getCardCenter(toCard, arrow.toSide);
-              else if (toShape) to = shapeEdgePoint(toShape, arrow.toSide);
               if (!from || !to) return null;
               const d = getArrowPath(from, to);
               const isSelected = selectedArrow === arrow.id;
@@ -1652,16 +1441,9 @@ export default function CanvasView() {
 
             {/* Drawing arrow preview */}
             {drawingArrow && (() => {
-              let from: { x: number; y: number } | null = null;
-              if (drawingArrow.from.kind === 'card') {
-                const fromCard = cards.find((c) => c.id === drawingArrow.from.id);
-                if (!fromCard) return null;
-                from = getCardCenter(fromCard, drawingArrow.fromSide);
-              } else {
-                const sh = shapes.find((s) => s.id === drawingArrow.from.id);
-                if (!sh) return null;
-                from = shapeEdgePoint(sh, drawingArrow.fromSide as 'top' | 'right' | 'bottom' | 'left');
-              }
+              const fromCard = cards.find((c) => c.id === drawingArrow.fromCardId);
+              if (!fromCard) return null;
+              const from = getCardCenter(fromCard, drawingArrow.fromSide);
               const d = getArrowPath(from, { x: drawingArrow.currentX, y: drawingArrow.currentY });
               return <path d={d} fill="none" stroke="hsl(var(--accent))" strokeWidth={1.5} opacity={0.4} strokeDasharray="4 4" />;
             })()}
@@ -1976,7 +1758,7 @@ export default function CanvasView() {
                 </div>
 
                 {/* Connection handles (visible on hover or when drawing) */}
-                {(isHovered || (drawingArrow && !arrowSourceMatches(drawingArrow.from, 'card', card.id))) && !isEditMode && (
+                {(isHovered || (drawingArrow && drawingArrow.fromCardId !== card.id)) && !isEditMode && (
                   <>
                     {handles.map((side) => {
                       let style = {};
@@ -1996,12 +1778,11 @@ export default function CanvasView() {
                           onDragStart={(e) => e.preventDefault()}
                           onMouseDown={(e) => !drawingArrow && startArrowDrawFromCard(card.id, side, e)}
                           onMouseUp={(e) => {
-                            if (drawingArrow && !arrowSourceMatches(drawingArrow.from, 'card', card.id)) {
+                            if (drawingArrow && drawingArrow.fromCardId !== card.id) {
                               e.stopPropagation();
                               const newArrow: CanvasArrow = {
                                 id: `ca-${Date.now()}`,
-                                fromCardId: drawingArrow.from.kind === 'card' ? drawingArrow.from.id : undefined,
-                                fromShapeId: drawingArrow.from.kind === 'shape' ? drawingArrow.from.id : undefined,
+                                fromCardId: drawingArrow.fromCardId,
                                 toCardId: card.id,
                                 fromSide: drawingArrow.fromSide as CanvasArrow['fromSide'],
                                 toSide: side,
@@ -2093,88 +1874,35 @@ export default function CanvasView() {
         );
       })()}
 
-      {shapeCustomize && (() => {
-        const sh = shapes.find((s) => s.id === shapeCustomize.shapeId);
-        if (!sh) return null;
-        const bStyle = sh.borderStyle || 'solid';
-        const bw = sh.borderWidth;
-        return (
-          <div
-            className="fixed z-[2000] bg-popover border border-border rounded-xl shadow-xl p-3 w-[220px]"
-            style={{ left: shapeCustomize.x, top: shapeCustomize.y }}
-            onClick={(e) => e.stopPropagation()}
-          >
-            <p className="text-[10px] uppercase tracking-wider text-muted-foreground mb-2">Fill</p>
-            <div className="flex flex-wrap gap-1.5 mb-3">
-              <button
-                type="button"
-                onClick={() => updateShapes(shapes.map((s) => s.id === sh.id ? { ...s, fill: undefined } : s))}
-                className={`w-6 h-6 rounded-full border border-border flex items-center justify-center text-[8px] text-muted-foreground ${!sh.fill ? 'ring-2 ring-accent ring-offset-1 ring-offset-popover' : ''}`}
-                title="Transparent"
-              >
-                ✕
-              </button>
-              {FRAME_COLORS.map((color) => (
-                <button
-                  key={`fill-${color}`}
-                  type="button"
-                  onClick={() => updateShapes(shapes.map((s) => s.id === sh.id ? { ...s, fill: color } : s))}
-                  className={`w-6 h-6 rounded-full transition-all ${sh.fill === color ? 'ring-2 ring-accent ring-offset-1 ring-offset-popover scale-110' : 'hover:scale-105'}`}
-                  style={{ backgroundColor: color }}
-                  title={color}
-                />
-              ))}
-            </div>
-            <p className="text-[10px] uppercase tracking-wider text-muted-foreground mb-2">Border color</p>
-            <div className="flex flex-wrap gap-1.5 mb-3">
-              <button
-                type="button"
-                onClick={() => updateShapes(shapes.map((s) => s.id === sh.id ? { ...s, borderColor: undefined } : s))}
-                className={`w-6 h-6 rounded-full border border-border flex items-center justify-center text-[8px] text-muted-foreground ${!sh.borderColor ? 'ring-2 ring-accent ring-offset-1 ring-offset-popover' : ''}`}
-                title="Default"
-              >
-                A
-              </button>
-              {FRAME_COLORS.map((color) => (
-                <button
-                  key={`bd-${color}`}
-                  type="button"
-                  onClick={() => updateShapes(shapes.map((s) => s.id === sh.id ? { ...s, borderColor: color } : s))}
-                  className={`w-6 h-6 rounded-full transition-all ${sh.borderColor === color ? 'ring-2 ring-accent ring-offset-1 ring-offset-popover scale-110' : 'hover:scale-105'}`}
-                  style={{ backgroundColor: color }}
-                  title={color}
-                />
-              ))}
-            </div>
-            <p className="text-[10px] uppercase tracking-wider text-muted-foreground mb-2">Border style</p>
-            <div className="flex gap-1.5 mb-3">
-              {(['solid', 'dashed', 'none'] as const).map((style) => (
-                <button
-                  key={style}
-                  type="button"
-                  onClick={() => updateShapes(shapes.map((s) => s.id === sh.id ? { ...s, borderStyle: style } : s))}
-                  className={`flex-1 text-[10px] py-1 rounded border capitalize transition-colors ${bStyle === style ? 'border-accent bg-accent/10 text-accent' : 'border-border text-muted-foreground hover:bg-surface-hover'}`}
-                >
-                  {style}
-                </button>
-              ))}
-            </div>
-            <p className="text-[10px] uppercase tracking-wider text-muted-foreground mb-2">Border width</p>
-            <div className="flex gap-1.5">
-              {([1, 2, 3] as const).map((w) => (
-                <button
-                  key={w}
-                  type="button"
-                  onClick={() => updateShapes(shapes.map((s) => s.id === sh.id ? { ...s, borderWidth: w } : s))}
-                  className={`flex-1 text-[10px] py-1 rounded border transition-colors ${bw === w ? 'border-accent bg-accent/10 text-accent' : 'border-border text-muted-foreground hover:bg-surface-hover'}`}
-                >
-                  {w}px
-                </button>
-              ))}
-            </div>
-          </div>
-        );
-      })()}
+      <MermaidDiagramModal
+        open={mermaidModalOpen}
+        onClose={() => setMermaidModalOpen(false)}
+        onInsert={(svg) => {
+          if (!note) return;
+          const list = note.canvasMermaidDiagrams || [];
+          const baseX = MAIN_PAGE_STACK_LEFT + 820;
+          const baseY = MAIN_PAGE_STACK_TOP + 40;
+          let stagger = 0;
+          while (
+            list.some(
+              (d) =>
+                Math.abs(d.x - (baseX + stagger * 28)) < 12 && Math.abs(d.y - (baseY + stagger * 28)) < 12
+            )
+          ) {
+            stagger += 1;
+            if (stagger > 80) break;
+          }
+          const id = `mmd-${Date.now()}`;
+          const newDiagram: CanvasMermaidDiagram = {
+            id,
+            x: baseX + stagger * 28,
+            y: baseY + stagger * 28,
+            svg,
+          };
+          updateNote(note.id, { canvasMermaidDiagrams: [...list, newDiagram] });
+          setSelectedMermaidDiagramId(id);
+        }}
+      />
 
       {/* Zoom indicator */}
       <button
@@ -2191,7 +1919,6 @@ export default function CanvasView() {
           { id: 'select' as CanvasTool, icon: MousePointer2, label: 'Select (V)' },
           { id: 'card' as CanvasTool, icon: Plus, label: 'Card' },
           { id: 'frame' as CanvasTool, icon: Square, label: 'Frame (R)' },
-          { id: 'shape' as CanvasTool, icon: Circle, label: `Shape (${shortcutsConfig.shapeTool})` },
           { id: 'text' as CanvasTool, icon: Type, label: `Text (${shortcutsConfig.textTool})` },
           { id: 'ink' as CanvasTool, icon: Pencil, label: 'Ink (I)' },
         ]).map((t) => (
@@ -2231,50 +1958,6 @@ export default function CanvasView() {
         >
           <ZoomIn size={17} />
         </button>
-
-        {tool === 'shape' && (
-          <>
-            <div className="w-px h-5 bg-popover-foreground/20 mx-0.5" />
-            <div className="flex items-center gap-1">
-              <button
-                type="button"
-                title="Rectangle"
-                onClick={() => setShapeToolType('rect')}
-                className={`w-8 h-8 rounded-lg flex items-center justify-center transition-spring-micro ${
-                  shapeToolType === 'rect'
-                    ? 'ring-2 ring-popover-foreground/40 ring-offset-1 ring-offset-popover'
-                    : 'hover:bg-accent/20'
-                }`}
-              >
-                <span className="block w-3.5 h-2.5 border-2 border-current rounded-[3px]" />
-              </button>
-              <button
-                type="button"
-                title="Ellipse"
-                onClick={() => setShapeToolType('ellipse')}
-                className={`w-8 h-8 rounded-lg flex items-center justify-center transition-spring-micro ${
-                  shapeToolType === 'ellipse'
-                    ? 'ring-2 ring-popover-foreground/40 ring-offset-1 ring-offset-popover'
-                    : 'hover:bg-accent/20'
-                }`}
-              >
-                <Circle size={17} strokeWidth={2.25} />
-              </button>
-              <button
-                type="button"
-                title="Triangle"
-                onClick={() => setShapeToolType('triangle')}
-                className={`w-8 h-8 rounded-lg flex items-center justify-center transition-spring-micro ${
-                  shapeToolType === 'triangle'
-                    ? 'ring-2 ring-popover-foreground/40 ring-offset-1 ring-offset-popover'
-                    : 'hover:bg-accent/20'
-                }`}
-              >
-                <Triangle size={17} strokeWidth={2.25} />
-              </button>
-            </div>
-          </>
-        )}
 
         {tool === 'text' && (
           <>

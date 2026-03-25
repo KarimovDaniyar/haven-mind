@@ -1,16 +1,17 @@
 import React, { useEffect } from 'react';
 import { AnimatePresence, motion } from 'framer-motion';
 import { useAppStore } from '../store/appStore';
-import { sampleNotes, generateFocusData } from '../data/sampleData';
-import AppSidebar from '../components/AppSidebar';
+import { sampleNotes, generateFocusData, createDefaultCanvasMainPages } from '../data/sampleData';
+import { createDefaultCanvasMermaidDiagrams } from '../data/defaultCanvasErMermaid';
 import NoteList from '../components/NoteList';
 import NoteEditor from '../components/NoteEditor';
 import CanvasView from '../components/CanvasView';
+import NoteAdviserPanel from '../components/NoteAdviserPanel';
 import FocusTimer from '../components/FocusTimer';
 import QuickCapture from '../components/QuickCapture';
 
 export default function Index() {
-  const { activeView, rocketPanelCollapsed, notesSidebarCollapsed, notes, activeNoteId } = useAppStore();
+  const { activeView, notesSidebarCollapsed, notes, activeNoteId } = useAppStore();
   const editorColumnOpen =
     Boolean(activeNoteId && notes.some((n) => n.id === activeNoteId && n.type === 'text'));
 
@@ -38,6 +39,8 @@ export default function Index() {
         canvasGroups: [],
         canvasShapes: [],
         canvasFreeTexts: [],
+        canvasMermaidDiagrams: createDefaultCanvasMermaidDiagrams(),
+        canvasMainPages: createDefaultCanvasMainPages(),
       });
       store.setWorkspaceNoteId(id);
     };
@@ -58,33 +61,34 @@ export default function Index() {
 
   return (
     <div className="flex h-screen w-full min-w-[1280px] overflow-hidden bg-background">
-      <AppSidebar />
-
-      <div 
-        className="flex flex-1 h-full overflow-hidden relative"
-        style={{ 
-          marginRight: rocketPanelCollapsed ? 4 : 128, 
-          transition: 'margin-right 400ms cubic-bezier(0.175, 0.885, 0.32, 1.275)' 
-        }}
-      >
+      <div className="relative flex h-full min-h-0 min-w-0 flex-1 overflow-hidden" style={{ marginRight: 4 }}>
         <AnimatePresence mode="wait">
           {activeView === 'notes' && (
-            <motion.div key="notes" initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }} transition={viewTransition} className="flex flex-1 h-full min-h-0 min-w-0">
+            <motion.div
+              key="notes"
+              initial={{ opacity: 0 }}
+              animate={{ opacity: 1 }}
+              exit={{ opacity: 0 }}
+              transition={viewTransition}
+              className="relative flex h-full min-h-0 min-w-0 flex-1"
+            >
+              <div className="absolute inset-0 min-h-0 min-w-0">
+                <CanvasView />
+              </div>
               {!notesSidebarCollapsed && (
-                <>
+                <div className="pointer-events-auto absolute inset-y-0 left-0 z-[40] flex shadow-[4px_0_24px_rgba(0,0,0,0.12)]">
                   <NoteList />
                   {editorColumnOpen && (
-                  <div className="w-[min(420px,40vw)] max-w-[420px] shrink-0 min-w-0 border-r border-border h-full min-h-0 overflow-hidden flex flex-col">
-                    <NoteEditor />
-                  </div>
+                    <div className="flex h-full min-h-0 min-w-0 max-w-[420px] w-[min(420px,40vw)] shrink-0 flex-col overflow-hidden border-r border-border bg-background">
+                      <NoteEditor />
+                    </div>
                   )}
-                </>
+                </div>
               )}
-              <CanvasView />
+              <NoteAdviserPanel />
             </motion.div>
           )}
         </AnimatePresence>
-
       </div>
 
       <FocusTimer />
