@@ -9,7 +9,9 @@ const floatingBarClass =
   'flex flex-nowrap items-center gap-1.5 bg-popover border border-border rounded-lg px-2 py-1.5 shadow-md z-30 w-max max-w-[calc(100vw-48px)]';
 
 const btnClass =
-  'inline-flex items-center gap-1.5 text-[13px] px-2 py-1 rounded-md hover:bg-surface-hover text-foreground';
+  'inline-flex items-center gap-1.5 text-[13px] px-2 py-1 rounded-md transition-spring-micro';
+
+const btnIdleClass = 'text-popover-foreground/90 hover:bg-accent/20 hover:text-popover-foreground';
 
 const btnActiveClass = 'bg-accent text-accent-foreground hover:bg-accent hover:text-accent-foreground';
 
@@ -47,7 +49,7 @@ export default function CanvasActionToolbar({ hasMainPages, mergedMarkdownForPri
     >
       <button
         type="button"
-        className={`${btnClass} ${!notesSidebarCollapsed ? btnActiveClass : ''}`}
+        className={`${btnClass} ${!notesSidebarCollapsed ? btnActiveClass : btnIdleClass}`}
         title={notesSidebarCollapsed ? 'Show notes' : 'Hide notes'}
         onClick={() => setNotesSidebarCollapsed(!notesSidebarCollapsed)}
       >
@@ -60,7 +62,7 @@ export default function CanvasActionToolbar({ hasMainPages, mergedMarkdownForPri
       </button>
       <button
         type="button"
-        className={`${btnClass} ${noteAdviserOpen ? btnActiveClass : ''}`}
+        className={`${btnClass} ${noteAdviserOpen ? btnActiveClass : btnIdleClass}`}
         title="Note Adviser"
         onClick={() => toggleNoteAdviser()}
       >
@@ -69,7 +71,7 @@ export default function CanvasActionToolbar({ hasMainPages, mergedMarkdownForPri
       </button>
       <button
         type="button"
-        className={`${btnClass} ${!rocketPanelCollapsed ? btnActiveClass : ''}`}
+        className={`${btnClass} ${!rocketPanelCollapsed ? btnActiveClass : btnIdleClass}`}
         title={rocketPanelCollapsed ? 'Focus timer' : 'Hide focus timer'}
         onClick={() => setRocketPanelCollapsed(!rocketPanelCollapsed)}
       >
@@ -78,7 +80,7 @@ export default function CanvasActionToolbar({ hasMainPages, mergedMarkdownForPri
       </button>
       <button
         type="button"
-        className={`${btnClass} ${!hasMainPages ? 'opacity-40 pointer-events-none' : ''}`}
+        className={`${btnClass} ${btnIdleClass} ${!hasMainPages ? 'opacity-40 pointer-events-none' : ''}`}
         title="Export PDF / Print"
         onClick={exportPdf}
       >
@@ -87,7 +89,7 @@ export default function CanvasActionToolbar({ hasMainPages, mergedMarkdownForPri
       </button>
       <button
         type="button"
-        className={`${btnClass} ${!hasMainPages ? 'opacity-40 pointer-events-none' : ''}`}
+        className={`${btnClass} ${btnIdleClass} ${!hasMainPages ? 'opacity-40 pointer-events-none' : ''}`}
         title="Diagram (Mermaid)"
         onClick={onOpenDiagram}
       >

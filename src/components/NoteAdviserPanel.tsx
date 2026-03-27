@@ -1,4 +1,4 @@
-import React, { useState, useRef, useEffect } from 'react';
+import React, { useState, useRef, useEffect, useCallback } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
 import { X, Send } from 'lucide-react';
 import { useAppStore } from '../store/appStore';
@@ -12,8 +12,15 @@ const SAMPLE_REPLIES = [
   'Sample reply: If you are stuck, write one honest sentence about what you do not know yet.',
 ];
 
+const DEFAULT_SIDEBAR_WIDTH = 350;
+const MIN_SIDEBAR_WIDTH = 220;
+const MAX_SIDEBAR_WIDTH = 880;
+
 export default function NoteAdviserPanel() {
   const { noteAdviserOpen, setNoteAdviserOpen, rocketPanelCollapsed } = useAppStore();
+  const [sidebarWidth, setSidebarWidth] = useState(DEFAULT_SIDEBAR_WIDTH);
+  const moveHandlerRef = useRef<((ev: MouseEvent) => void) | null>(null);
+  const upHandlerRef = useRef<(() => void) | null>(null);
   const [messages, setMessages] = useState<Msg[]>([
     {
       id: 'welcome',
@@ -25,6 +32,39 @@ export default function NoteAdviserPanel() {
   const [pending, setPending] = useState(false);
   const replyIdx = useRef(0);
   const bottomRef = useRef<HTMLDivElement>(null);
+
+  const startResize = useCallback((e: React.MouseEvent) => {
+    e.preventDefault();
+    e.stopPropagation();
+
+    if (moveHandlerRef.current) window.removeEventListener('mousemove', moveHandlerRef.current);
+    if (upHandlerRef.current) window.removeEventListener('mouseup', upHandlerRef.current);
+
+    const onMove = (ev: MouseEvent) => {
+      const next = window.innerWidth - ev.clientX;
+      const clamped = Math.max(MIN_SIDEBAR_WIDTH, Math.min(MAX_SIDEBAR_WIDTH, Math.round(next)));
+      setSidebarWidth(clamped);
+    };
+
+    const onUp = () => {
+      window.removeEventListener('mousemove', onMove);
+      window.removeEventListener('mouseup', onUp);
+      moveHandlerRef.current = null;
+      upHandlerRef.current = null;
+    };
+
+    moveHandlerRef.current = onMove;
+    upHandlerRef.current = onUp;
+    window.addEventListener('mousemove', onMove);
+    window.addEventListener('mouseup', onUp);
+  }, []);
+
+  useEffect(() => {
+    return () => {
+      if (moveHandlerRef.current) window.removeEventListener('mousemove', moveHandlerRef.current);
+      if (upHandlerRef.current) window.removeEventListener('mouseup', upHandlerRef.current);
+    };
+  }, []);
 
   useEffect(() => {
     bottomRef.current?.scrollIntoView({ behavior: 'smooth' });
@@ -45,20 +85,26 @@ export default function NoteAdviserPanel() {
     }, 450 + Math.random() * 400);
   };
 
-  const rightInset = rocketPanelCollapsed ? 4 : 128;
+  const rightInset = rocketPanelCollapsed ? 4 : DEFAULT_SIDEBAR_WIDTH;
 
   return (
     <AnimatePresence initial={false}>
       {noteAdviserOpen && (
         <motion.aside
           key="adviser"
-          initial={{ x: 380, opacity: 0 }}
+          initial={{ x: sidebarWidth + 20, opacity: 0 }}
           animate={{ x: 0, opacity: 1 }}
-          exit={{ x: 380, opacity: 0 }}
+          exit={{ x: sidebarWidth + 20, opacity: 0 }}
           transition={{ type: 'spring', stiffness: 380, damping: 34 }}
-          style={{ top: 0, bottom: 0, right: rightInset, width: 360, zIndex: 45 }}
+          style={{ top: 0, bottom: 0, right: rightInset, width: sidebarWidth, zIndex: 45 }}
           className="pointer-events-auto fixed flex min-h-0 flex-col overflow-hidden border-l border-border bg-background shadow-lg"
         >
+          <div
+            role="separator"
+            aria-label="Resize note adviser"
+            onMouseDown={startResize}
+            className="absolute left-0 top-0 h-full w-1.5 -translate-x-1/2 cursor-ew-resize bg-transparent"
+          />
           <div className="flex items-center justify-between gap-2 border-b border-border px-3 py-2">
             <span className="text-sm font-medium text-foreground">Note Adviser</span>
             <button
