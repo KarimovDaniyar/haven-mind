@@ -10,7 +10,7 @@ import {
 } from './ui/context-menu';
 
 export default function NoteList() {
-  const { notes, activeNoteId, setActiveNoteId, addNote, updateNote, deleteNote } = useAppStore();
+  const { notes, activeNoteId, setActiveNoteId, addNote, updateNote, deleteNote, recordMissionNoteCreated } = useAppStore();
   const [searchOpen, setSearchOpen] = useState(false);
   const [searchQuery, setSearchQuery] = useState('');
   const [renamingId, setRenamingId] = useState<string | null>(null);
@@ -42,6 +42,7 @@ export default function NoteList() {
       updatedAt: Date.now(),
     };
     addNote(note);
+    recordMissionNoteCreated();
     setActiveNoteId(note.id);
     // Start renaming immediately for new notes
     setRenamingId(note.id);
@@ -68,7 +69,7 @@ export default function NoteList() {
   };
 
   return (
-    <div className="w-[260px] h-full flex flex-col border-r border-border bg-surface flex-shrink-0">
+    <div className="w-[220px] h-full flex flex-col border-r border-border bg-surface flex-shrink-0">
       {/* Header */}
       <div className="px-4 pt-4 pb-2 flex items-center justify-between">
         {searchOpen ? (

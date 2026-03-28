@@ -13,6 +13,8 @@ const SAMPLE_REPLIES = [
 ];
 
 const DEFAULT_SIDEBAR_WIDTH = 350;
+/** Must match `ROCKET_PANEL_WIDTH` in FocusTimer (rocket strip when collapsed is 4px). */
+const ROCKET_PANEL_WIDTH = 340;
 const MIN_SIDEBAR_WIDTH = 220;
 const MAX_SIDEBAR_WIDTH = 880;
 
@@ -85,7 +87,7 @@ export default function NoteAdviserPanel() {
     }, 450 + Math.random() * 400);
   };
 
-  const rightInset = rocketPanelCollapsed ? 4 : DEFAULT_SIDEBAR_WIDTH;
+  const rightInset = rocketPanelCollapsed ? 4 : ROCKET_PANEL_WIDTH;
 
   return (
     <AnimatePresence initial={false}>

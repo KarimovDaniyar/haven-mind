@@ -11,6 +11,7 @@ export default function QuickCapture() {
     workspaceNoteId,
     updateNote,
     addNote,
+    recordMissionNoteCreated,
   } = useAppStore();
   const inputRef = useRef<HTMLInputElement>(null);
 
@@ -56,6 +57,7 @@ export default function QuickCapture() {
         createdAt: Date.now(),
         updatedAt: Date.now(),
       });
+      recordMissionNoteCreated();
       const newCard = { id: `qc-${Date.now()}`, x, y, content: '', linkedNoteId: newNoteId, width: 320 };
       updateNote(canvasNote.id, { canvasCards: [...(canvasNote.canvasCards || []), newCard] });
     }

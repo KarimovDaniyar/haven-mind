@@ -164,6 +164,8 @@ export default function CanvasView() {
     notes,
     workspaceNoteId,
     updateNote,
+    recordMissionNoteCreated,
+    recordMissionMermaidInserted,
     setActiveNoteId,
     setActiveView,
     shortcutsConfig,
@@ -1944,6 +1946,7 @@ export default function CanvasView() {
                                   createdAt: Date.now(),
                                   updatedAt: Date.now(),
                                 });
+                                st.recordMissionNoteCreated();
                                 if (wsId) {
                                   st.updateNote(wsId, {
                                     canvasCards: list.map((c) =>
@@ -2258,6 +2261,7 @@ export default function CanvasView() {
             svg,
           };
           updateNote(note.id, { canvasMermaidDiagrams: [...list, newDiagram] });
+          recordMissionMermaidInserted();
           setSelectedMermaidDiagramId(id);
         }}
       />

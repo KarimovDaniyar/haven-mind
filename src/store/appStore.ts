@@ -116,6 +116,28 @@ export interface TimerSession {
   completedAt: number;
 }
 
+export type MissionDestination = 'MOON' | 'MARS' | 'JUPITER' | 'SATURN' | 'NEPTUNE';
+
+export interface MissionStats {
+  notesCreated: number;
+  linksCreated: number;
+  focusMinutes: number;
+}
+
+export interface MissionState {
+  active: boolean;
+  title: string;
+  destination: MissionDestination | null;
+  fuel: number;
+  typedWordsCarry: number;
+  stats: MissionStats;
+  completed: boolean;
+  completionCardOpen: boolean;
+  trophyMode: boolean;
+  /** When set, replaces MISSION_REQUIRED_FUEL for this mission (scaled focus duration). */
+  customRequiredFuel: number | null;
+}
+
 export type ViewType = 'notes';
 
 export interface ShortcutsConfig {
@@ -152,6 +174,122 @@ function loadShortcuts(): ShortcutsConfig {
     if (saved) return { ...DEFAULT_SHORTCUTS, ...JSON.parse(saved) };
   } catch {}
   return DEFAULT_SHORTCUTS;
+}
+
+export const MISSION_REQUIRED_FUEL: Record<MissionDestination, number> = {
+  MOON: 100,
+  MARS: 300,
+  JUPITER: 600,
+  SATURN: 1200,
+  NEPTUNE: 2500,
+};
+
+const defaultMissionStats: MissionStats = {
+  notesCreated: 0,
+  linksCreated: 0,
+  focusMinutes: 0,
+};
+
+const defaultMissionState: MissionState = {
+  active: false,
+  title: '',
+  destination: null,
+  fuel: 0,
+  typedWordsCarry: 0,
+  stats: defaultMissionStats,
+  completed: false,
+  completionCardOpen: false,
+  trophyMode: false,
+  customRequiredFuel: null,
+};
+
+function countWords(text: string): number {
+  const matches = text.trim().match(/\S+/g);
+  return matches ? matches.length : 0;
+}
+
+function countWikiLinks(text: string): number {
+  const matches = text.match(/\[\[[^\[\]]+\]\]/g);
+  return matches ? matches.length : 0;
+}
+
+function countWordsInMainPages(pages?: CanvasMainPage[]): number {
+  if (!pages || pages.length === 0) return 0;
+  return pages.reduce((acc, page) => acc + countWords(page.content || ''), 0);
+}
+
+function countLinksInMainPages(pages?: CanvasMainPage[]): number {
+  if (!pages || pages.length === 0) return 0;
+  return pages.reduce((acc, page) => acc + countWikiLinks(page.content || ''), 0);
+}
+
+function countWordsInCards(cards?: CanvasCard[]): number {
+  if (!cards || cards.length === 0) return 0;
+  return cards.reduce((acc, card) => acc + countWords(card.content || ''), 0);
+}
+
+function countLinksInCards(cards?: CanvasCard[]): number {
+  if (!cards || cards.length === 0) return 0;
+  return cards.reduce((acc, card) => acc + countWikiLinks(card.content || ''), 0);
+}
+
+const MISSION_STORAGE_KEY = 'havenMindMission';
+
+function loadMission(): MissionState {
+  try {
+    const raw = localStorage.getItem(MISSION_STORAGE_KEY);
+    if (!raw) {
+      return { ...defaultMissionState, stats: { ...defaultMissionStats } };
+    }
+    const parsed = JSON.parse(raw) as Partial<MissionState>;
+    return {
+      ...defaultMissionState,
+      ...parsed,
+      stats: { ...defaultMissionStats, ...parsed.stats },
+      customRequiredFuel:
+        parsed.customRequiredFuel != null && parsed.customRequiredFuel > 0
+          ? parsed.customRequiredFuel
+          : null,
+    };
+  } catch {
+    return { ...defaultMissionState, stats: { ...defaultMissionStats } };
+  }
+}
+
+function persistMission(mission: MissionState): void {
+  try {
+    localStorage.setItem(MISSION_STORAGE_KEY, JSON.stringify(mission));
+  } catch {}
+}
+
+function applyMissionActivity(
+  mission: MissionState,
+  baseFuelGain: number,
+  statsDelta?: Partial<MissionStats>,
+): MissionState {
+  if (!mission.active || !mission.destination || mission.trophyMode) return mission;
+
+  const fuelGain = Math.max(0, Math.floor(baseFuelGain));
+
+  const required =
+    mission.customRequiredFuel != null && mission.customRequiredFuel > 0
+      ? mission.customRequiredFuel
+      : MISSION_REQUIRED_FUEL[mission.destination];
+  const fuel = Math.min(required, mission.fuel + fuelGain);
+  const completedNow = fuel >= required;
+  const stats: MissionStats = {
+    notesCreated: mission.stats.notesCreated + (statsDelta?.notesCreated || 0),
+    linksCreated: mission.stats.linksCreated + (statsDelta?.linksCreated || 0),
+    focusMinutes: mission.stats.focusMinutes + (statsDelta?.focusMinutes || 0),
+  };
+
+  return {
+    ...mission,
+    fuel,
+    stats,
+    completed: mission.completed || completedNow,
+    completionCardOpen: mission.completionCardOpen || completedNow,
+  };
 }
 
 interface AppState {
@@ -196,6 +334,14 @@ interface AppState {
   noteAdviserOpen: boolean;
   setNoteAdviserOpen: (open: boolean) => void;
   toggleNoteAdviser: () => void;
+
+  mission: MissionState;
+  launchMission: (title: string, destination: MissionDestination, customRequiredFuel?: number | null) => void;
+  resetMission: () => void;
+  keepExploringMission: () => void;
+  recordMissionNoteCreated: () => void;
+  recordMissionMermaidInserted: () => void;
+  recordMissionFocusTicks: (deltaMinutes: number) => void;
 }
 
 export const useAppStore = create<AppState>((set) => ({
@@ -210,9 +356,63 @@ export const useAppStore = create<AppState>((set) => ({
   setWorkspaceNoteId: (id) => set({ workspaceNoteId: id }),
 
   addNote: (note) => set((s) => ({ notes: [note, ...s.notes] })),
-  updateNote: (id, updates) => set((s) => ({
-    notes: s.notes.map((n) => n.id === id ? { ...n, ...updates, updatedAt: Date.now() } : n),
-  })),
+  updateNote: (id, updates) => set((s) => {
+    const prevNote = s.notes.find((n) => n.id === id);
+    let nextMission = s.mission;
+
+    if (prevNote) {
+      let addedWords = 0;
+      let addedLinks = 0;
+
+      if (typeof updates.content === 'string') {
+        const prevWords = countWords(prevNote.content || '');
+        const nextWords = countWords(updates.content);
+        addedWords += Math.max(0, nextWords - prevWords);
+
+        const prevLinks = countWikiLinks(prevNote.content || '');
+        const nextLinks = countWikiLinks(updates.content);
+        addedLinks += Math.max(0, nextLinks - prevLinks);
+      }
+
+      if (Array.isArray(updates.canvasMainPages)) {
+        const prevWords = countWordsInMainPages(prevNote.canvasMainPages);
+        const nextWords = countWordsInMainPages(updates.canvasMainPages);
+        addedWords += Math.max(0, nextWords - prevWords);
+
+        const prevLinks = countLinksInMainPages(prevNote.canvasMainPages);
+        const nextLinks = countLinksInMainPages(updates.canvasMainPages);
+        addedLinks += Math.max(0, nextLinks - prevLinks);
+      }
+
+      if (Array.isArray(updates.canvasCards)) {
+        const prevWords = countWordsInCards(prevNote.canvasCards);
+        const nextWords = countWordsInCards(updates.canvasCards);
+        addedWords += Math.max(0, nextWords - prevWords);
+
+        const prevLinks = countLinksInCards(prevNote.canvasCards);
+        const nextLinks = countLinksInCards(updates.canvasCards);
+        addedLinks += Math.max(0, nextLinks - prevLinks);
+      }
+
+      if (addedWords > 0 || addedLinks > 0) {
+        const carryTotal = s.mission.typedWordsCarry + addedWords;
+        const wordFuel = Math.floor(carryTotal / 100);
+        const nextCarry = carryTotal % 100;
+        nextMission = {
+          ...applyMissionActivity(s.mission, wordFuel * 5 + addedLinks * 20, {
+            linksCreated: addedLinks,
+          }),
+          typedWordsCarry: nextCarry,
+        };
+      }
+    }
+
+    persistMission(nextMission);
+    return {
+      notes: s.notes.map((n) => n.id === id ? { ...n, ...updates, updatedAt: Date.now() } : n),
+      mission: nextMission,
+    };
+  }),
   deleteNote: (id) => set((s) => {
     if (s.workspaceNoteId === id) return s;
     return {
@@ -256,4 +456,65 @@ export const useAppStore = create<AppState>((set) => ({
   noteAdviserOpen: false,
   setNoteAdviserOpen: (open) => set({ noteAdviserOpen: open }),
   toggleNoteAdviser: () => set((s) => ({ noteAdviserOpen: !s.noteAdviserOpen })),
+
+  mission: loadMission(),
+  launchMission: (title, destination, customRequiredFuel) => set(() => {
+    const scaled =
+      customRequiredFuel != null &&
+      Number.isFinite(customRequiredFuel) &&
+      customRequiredFuel > 0
+        ? Math.max(1, Math.floor(customRequiredFuel))
+        : null;
+    const mission: MissionState = {
+      active: true,
+      title: title.trim(),
+      destination,
+      fuel: 0,
+      typedWordsCarry: 0,
+      stats: { ...defaultMissionStats },
+      completed: false,
+      completionCardOpen: false,
+      trophyMode: false,
+      customRequiredFuel: scaled,
+    };
+    persistMission(mission);
+    return { mission };
+  }),
+  resetMission: () => set(() => {
+    const mission = { ...defaultMissionState, stats: { ...defaultMissionStats } };
+    persistMission(mission);
+    return { mission };
+  }),
+  keepExploringMission: () => set((s) => {
+    const mission: MissionState = {
+      ...s.mission,
+      fuel: 0,
+      typedWordsCarry: 0,
+      completed: false,
+      completionCardOpen: false,
+      trophyMode: true,
+    };
+    persistMission(mission);
+    return { mission };
+  }),
+  recordMissionNoteCreated: () => set((s) => {
+    const mission = applyMissionActivity(s.mission, 10, { notesCreated: 1 });
+    persistMission(mission);
+    return { mission };
+  }),
+  recordMissionMermaidInserted: () => set((s) => {
+    const mission = applyMissionActivity(s.mission, 30);
+    persistMission(mission);
+    return { mission };
+  }),
+  recordMissionFocusTicks: (deltaMinutes) => set((s) => {
+    const d = Math.max(0, Math.floor(deltaMinutes));
+    if (d <= 0) return s;
+    const mission = applyMissionActivity(s.mission, d * 3, {
+      focusMinutes: d,
+    });
+    if (mission === s.mission) return s;
+    persistMission(mission);
+    return { mission };
+  }),
 }));
